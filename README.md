@@ -23,6 +23,12 @@ Objective of this build was to showcase a demo of the agent that can execute ret
 
 Three design commitments, each addressing a failure mode that shows up when you move from demo to production.
 
+<p align="center">
+  <img src="architecture.svg" alt="Returns and exchange agent architecture" width="640">
+</p>
+
+<sub>Customer message → primary agent (plans tool calls) → composable skills → systems of record → supervisor (policy / PII / approval check) → send to customer, or revise / escalate. Every change is scored by the eval harness.</sub>
+
 ```
                           ┌─────────────────┐
    customer message  ─────▶   Primary agent  │
@@ -46,6 +52,9 @@ Three design commitments, each addressing a failure mode that shows up when you 
                                    │ pass → send   │ fail → revise / escalate
                                    ▼
                               customer / human
+
+
+                              
 ```
 ## Architectural considerations: 
 ### 1. Tool orchestration against systems of record

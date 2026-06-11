@@ -1,0 +1,70 @@
+<svg width="100%" viewBox="0 0 680 540" role="img" xmlns="http://www.w3.org/2000/svg"><title>Returns and exchange agent architecture</title><desc>A customer message flows into a primary agent that selects composable skills, which call mock systems of record. The drafted response passes through a supervisor that checks policy before sending to the customer or escalating to a human.</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+
+<g>
+<rect x="250" y="30" width="180" height="44" rx="8" fill="rgb(241, 239, 232)" stroke="rgb(95, 94, 90)" stroke-width="0.5"/>
+<text x="340" y="52" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(68, 68, 65)">Customer message</text>
+</g>
+<line x1="340" y1="74" x2="340" y2="104" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+
+<g>
+<rect x="240" y="104" width="200" height="56" rx="8" fill="rgb(238, 237, 254)" stroke="rgb(83, 74, 183)" stroke-width="0.5"/>
+<text x="340" y="124" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(60, 52, 137)">Primary agent</text>
+<text x="340" y="142" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(83, 74, 183)">Claude, plans tool calls</text>
+</g>
+<line x1="340" y1="160" x2="340" y2="190" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+
+<g>
+<rect x="240" y="190" width="200" height="56" rx="8" fill="rgb(225, 245, 238)" stroke="rgb(15, 110, 86)" stroke-width="0.5"/>
+<text x="340" y="210" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(8, 80, 65)">Composable skills</text>
+<text x="340" y="228" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(15, 110, 86)">Eligibility, exchange, escalate</text>
+</g>
+
+<g>
+<rect x="470" y="172" width="170" height="92" rx="8" fill="rgb(230, 241, 251)" stroke="rgb(24, 95, 165)" stroke-width="0.5"/>
+<text x="555" y="192" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(12, 68, 124)">Systems of record</text>
+<text x="555" y="214" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(24, 95, 165)">lookup_order</text>
+<text x="555" y="232" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(24, 95, 165)">check_eligibility</text>
+<text x="555" y="250" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(24, 95, 165)">create_label</text>
+</g>
+<line x1="440" y1="210" x2="468" y2="210" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+<line x1="468" y1="228" x2="442" y2="228" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+
+<line x1="340" y1="246" x2="340" y2="276" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+
+<g>
+<rect x="240" y="276" width="200" height="56" rx="8" fill="rgb(250, 238, 218)" stroke="rgb(133, 79, 11)" stroke-width="0.5"/>
+<text x="340" y="296" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(99, 56, 6)">Supervisor</text>
+<text x="340" y="314" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(133, 79, 11)">Policy + PII + approval check</text>
+</g>
+
+<g>
+<rect x="470" y="276" width="170" height="56" rx="8" fill="rgb(241, 239, 232)" stroke="rgb(95, 94, 90)" stroke-width="0.5"/>
+<text x="555" y="296" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(68, 68, 65)">policy.yaml</text>
+<text x="555" y="314" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(95, 94, 90)">Window, region, gates</text>
+</g>
+<line x1="468" y1="304" x2="442" y2="304" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+
+<line x1="300" y1="332" x2="200" y2="396" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+<text x="220" y="368" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(61, 61, 58)">pass</text>
+<line x1="380" y1="332" x2="480" y2="396" marker-end="url(#arrow)" stroke="rgb(115, 114, 108)" stroke-width="1.5"/>
+<text x="462" y="368" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(61, 61, 58)">fail</text>
+
+<g>
+<rect x="90" y="396" width="180" height="44" rx="8" fill="rgb(225, 245, 238)" stroke="rgb(15, 110, 86)" stroke-width="0.5"/>
+<text x="180" y="418" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(8, 80, 65)">Send to customer</text>
+</g>
+
+<g>
+<rect x="410" y="396" width="180" height="44" rx="8" fill="rgb(250, 236, 231)" stroke="rgb(153, 60, 29)" stroke-width="0.5"/>
+<text x="500" y="418" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="500" fill="rgb(113, 43, 19)">Revise or escalate</text>
+</g>
+
+<g>
+<rect x="90" y="470" width="500" height="44" rx="8" fill="rgb(241, 239, 232)" stroke="rgb(95, 94, 90)" stroke-width="0.5"/>
+<text x="340" y="486" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(95, 94, 90)">Eval harness: golden set + LLM-as-judge scores every change</text>
+<text x="340" y="502" text-anchor="middle" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="rgb(95, 94, 90)">happy path · policy edges · safety · escalation</text>
+</g>
+</svg>
