@@ -105,13 +105,13 @@ python evals/run_evals.py   # reliability suite
 ## What I'd add for a real production deployment
 
 
-- **Streaming + latency budgets** — the supervisor adds a round-trip; in production you'd stream the primary response and run async checks, or use a faster supervisor model.
-- **Observability** — structured logging of every tool call and supervisor decision, so failures are debuggable after the fact.
-- **Real integrations** — swap mocks for actual OMS/WMS/payment APIs, with retries and idempotency on state-changing calls.
-- **Human-in-the-loop tooling** — an actual queue and interface for escalations, not just a flag.
-- **Eval expansion** — grow the golden set from real (anonymized) transcripts; today's set is hand-authored.
+- **Streaming + latency budgets** — the supervisor adds a round-trip; in production you'd stream the primary response and run async checks, or use a faster supervisor model to get back to customer quicker.
+- **Observability** — structured logging of every tool call and supervisor decision, so failures are debuggable and we can improve the quality of responses.
+- **Real integrations** — swap mocks for actual OMS/payment APIs, with retries.
+- **Human-in-the-loop tooling** — an actual queue and interface for escalations, not just a flag. this would be next iteration for prototyping - V2.
+- **Eval expansion** — grow the golden set from real (anonymized) transcripts; today's set is manually authored.
 - **Tool call history** - current loop does not look into tool call history. This is safe for current set up as per policy we should always look up order before making any claim.
 
 ---
 
-*Built as a learning project to think through agent architecture for high-volume customer service. Plain Python, Claude API, no orchestration framework — the control flow is intentionally legible.*
+*Built as a learning project to think through agent architecture for high-volume customer service. Plain Python, Claude API, no orchestration framework to showcase how control will work. 
