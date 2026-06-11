@@ -1,0 +1,11 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Office temp lock files
+~$*.docx
+~$*.xlsx

@@ -1,0 +1,4 @@
+anthropic==0.109.1
+PyYAML==6.0.3
+python-dotenv
+flask

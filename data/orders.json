@@ -1,0 +1,51 @@
+{
+  "NW-10021": {
+    "order_id": "NW-10021",
+    "customer_email": "maya.t@example.com",
+    "customer_name": "Maya Tan",
+    "region": "Singapore",
+    "order_date": "2026-05-28",
+    "items": [
+      {"sku": "SHOE-RUN-9", "name": "Trailblazer Running Shoe", "size": "9", "color": "Slate", "price": 120.00, "final_sale": false}
+    ],
+    "status": "delivered",
+    "delivered_date": "2026-06-02"
+  },
+  "NW-10044": {
+    "order_id": "NW-10044",
+    "customer_email": "j.okafor@example.com",
+    "customer_name": "James Okafor",
+    "region": "Malaysia",
+    "order_date": "2026-03-15",
+    "items": [
+      {"sku": "JKT-RAIN-M", "name": "Stormshell Rain Jacket", "size": "M", "color": "Black", "price": 95.00, "final_sale": false}
+    ],
+    "status": "delivered",
+    "delivered_date": "2026-03-20"
+  },
+  "NW-10067": {
+    "order_id": "NW-10067",
+    "customer_email": "priya.r@example.com",
+    "customer_name": "Priya Raman",
+    "region": "Singapore",
+    "order_date": "2026-06-05",
+    "items": [
+      {"sku": "TEE-MERINO-S", "name": "Merino Base Tee", "size": "S", "color": "Forest", "price": 60.00, "final_sale": true}
+    ],
+    "status": "delivered",
+    "delivered_date": "2026-06-08"
+  },
+  "NW-10088": {
+    "order_id": "NW-10088",
+    "customer_email": "maya.t@example.com",
+    "customer_name": "Maya Tan",
+    "region": "Singapore",
+    "order_date": "2026-06-07",
+    "items": [
+      {"sku": "SHOE-RUN-9", "name": "Trailblazer Running Shoe", "size": "9", "color": "Slate", "price": 120.00, "final_sale": false},
+      {"sku": "SOCK-WOOL-L", "name": "Wool Crew Socks", "size": "L", "color": "Grey", "price": 18.00, "final_sale": false}
+    ],
+    "status": "delivered",
+    "delivered_date": "2026-06-09"
+  }
+}

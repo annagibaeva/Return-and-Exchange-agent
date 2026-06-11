@@ -1,0 +1,6 @@
+{
+  "SHOE-RUN-9": {"sku": "SHOE-RUN-9", "name": "Trailblazer Running Shoe", "variants": {"8": 4, "9": 0, "10": 7, "11": 2}, "color": "Slate"},
+  "JKT-RAIN-M": {"sku": "JKT-RAIN-M", "name": "Stormshell Rain Jacket", "variants": {"S": 3, "M": 1, "L": 5, "XL": 0}, "color": "Black"},
+  "TEE-MERINO-S": {"sku": "TEE-MERINO-S", "name": "Merino Base Tee", "variants": {"S": 9, "M": 12, "L": 6}, "color": "Forest"},
+  "SOCK-WOOL-L": {"sku": "SOCK-WOOL-L", "name": "Wool Crew Socks", "variants": {"M": 20, "L": 15}, "color": "Grey"}
+}

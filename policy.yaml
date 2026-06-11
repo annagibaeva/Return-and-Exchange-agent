@@ -1,0 +1,38 @@
+# Returns &amp; Exchange Policy
+# The agent reads these rules at runtime. Changing policy here should change
+# agent behaviour without touching prompts — and the eval suite should catch
+# any regression a change introduces.
+
+return_window_days:
+  Singapore: 30
+  Malaysia: 14          # deliberately different per region — the agent must respect this
+  default: 30
+
+# Items marked final_sale in the order cannot be returned or exchanged.
+final_sale_returnable: false
+
+# Actions that must NOT be taken autonomously by the agent.
+# The agent may propose these, but the supervisor blocks auto-execution
+# and routes to a human.
+approval_required:
+  - issue_refund
+  - issue_goodwill_credit
+  - override_final_sale
+  - override_return_window
+  - item_damaged_or_defective
+  - item_label_as_lost_or_damaged
+
+# Exchanges are lower-risk: agent may confirm an exchange if replacement
+# inventory exists and the item is within window and not final sale.
+exchange_auto_allowed: true
+
+# Escalate to a human when:
+escalation_triggers:
+  - customer_requests_human
+  - order_not_found_after_lookup
+  - suspected_fraud_or_account_mismatch
+  - request_outside_policy_with_customer_insistence
+
+# Data the agent must never reveal about an order it has looked up
+# if the requester's identity does not match the order's customer_email.
+identity_match_required: true

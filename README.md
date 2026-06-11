@@ -1,0 +1,117 @@
+# Returns &amp; Exchange Agent
+
+A production-shaped customer-service agent for retail returns and exchanges for "Singapore Apparel" (made up name), built in plain Python on the Claude API. It is not a RAG chatbot — it orchestrates real system calls, supervises its own outputs, and ships with an eval harness that measures reliability before and after changes.
+Objective of this build was to showcase a demo of the agent that can execute return end to end without interference so that we can put it in front of thousands of customers. Below is the overview of the architecture and set up:
+
+The intent is to simulate real world scenario for an agent that can be productionised and put in front of customers. 
+
+---
+
+## The problem
+
+Returns & Exchange Agent
+A production-shaped customer-service agent for retail returns and exchanges for "Singapore Apparel" (made up name), built in plain Python on the Claude API. It is not a RAG chatbot — it orchestrates real system calls, supervises its own outputs, and ships with an eval harness that measures reliability before and after changes.
+Objective of this build was to showcase a demo of the agent that can execute return end to end without interference so that we can put it in front of thousands of customers. Below is the overview of the architecture and set up:
+
+---
+## Key for success for this demo is: 
+- showcase how this will work end to end
+- sequencing is critical for this use case to work
+- safety: ensuring that policies and rules are followed. 
+---
+## Architecture
+
+Three design commitments, each addressing a failure mode that shows up when you move from demo to production.
+
+```
+                          ┌─────────────────┐
+   customer message  ─────▶   Primary agent  │
+                          │  (Claude + tools)│
+                          └────────┬─────────┘
+                                   │ drafts response + tool calls
+                                   ▼
+                          ┌─────────────────┐         systems of record
+                          │     Skills      │◀───────▶ lookup_order
+                          │ eligibility /   │         check_eligibility
+                          │ exchange /      │         check_inventory
+                          │ escalation      │         create_return_label
+                          └────────┬────────┘
+                                   │ proposed response
+                                   ▼
+                          ┌─────────────────┐
+                          │   Supervisor    │  ── policy check, PII check,
+                          │  (2nd Claude    │     approval-gate check
+                          │   call)         │
+                          └────────┬────────┘
+                                   │ pass → send   │ fail → revise / escalate
+                                   ▼
+                              customer / human
+```
+## Architectural considerations: 
+### 1. Tool orchestration against systems of record
+It is simulation, we need to test that it will work against real OMS that retailers use.
+The agent calls mock APIs — `lookup_order`, `check_return_eligibility`, `check_inventory`, `create_return_label` — in a required sequence. 
+Hook: checking control and sequence of the process flow and ensuring it would work in same way as in real life when you do real deployment against OMS system.
+
+### 2. A supervisor layer
+ Additional layer for verification is introduced to ensure that second model call verifies response against policy before anything reaches the customer and we are screening against long tail of inputs that customer might send. 
+Checking for : 
+-	Was customer data exposed? 
+-	Was return approved outside of the allowed return window
+-	Have we promised something that is not in the policy? 
+
+### 3. Composable skills, not one mega-prompt
+Agent is composed of “bricks” or modules with it is own “mini operating system”- own prompts and tools. When we add capability as a skill, it makes it easier to tset, extend and reason with what agent can and cant do. 
+
+### Policy &amp; determinism control
+For this agent we need to have policy/guardrails in place which are region specific and which actions require human approval/intervention.
+Refunds and credits for inconvenience/goodwill are routed through approval gates rather than leaving model to decide (deterministic behaviour) . 
+`policy.yaml` holds policy information. 
+
+---
+
+## Reliability: the eval harness
+
+This is required to measure success and impact of the agent, is it working as expected and solves the problem. 
+ `evals/golden_set.jsonl` holds ~20 scored test conversations:
+
+- **Happy path** — in-window return, straightforward exchange
+- **Policy edge cases** — out-of-window return, final-sale item, region-specific rule
+- **Safety** — request about another customer's order (must refuse), "just refund me anyway" pressure (must hold policy)
+- **Escalation** — cases the agent should hand to a human rather than resolve
+
+`evals/run_evals.py` runs the set through the agent and scores each outcome with an LLM-as-judge against an expected-behavior. The harness exists so that a prompt or policy change can be checked for regressions instead of hoped about.
+
+| Eval suite | Pass rate |
+|---|---|
+| Happy path | _run to populate_ |
+| Policy edge cases | _run to populate_ |
+| Safety / adversarial | _run to populate_ |
+| Escalation routing | _run to populate_ |
+
+---
+
+## Running it
+
+```bash
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY=sk-...
+streamlit run app.py        # chat UI
+python evals/run_evals.py   # reliability suite
+```
+
+---
+
+## What I'd add for a real production deployment
+
+
+- **Streaming + latency budgets** — the supervisor adds a round-trip; in production you'd stream the primary response and run async checks, or use a faster supervisor model.
+- **Observability** — structured logging of every tool call and supervisor decision, so failures are debuggable after the fact.
+- **Real integrations** — swap mocks for actual OMS/WMS/payment APIs, with retries and idempotency on state-changing calls.
+- **Human-in-the-loop tooling** — an actual queue and interface for escalations, not just a flag.
+- **Eval expansion** — grow the golden set from real (anonymized) transcripts; today's set is hand-authored.
+- **Tool call history** - current loop does not look into tool call history. This is safe for current set up as per policy we should always look up order before making any claim.
+
+---
+
+*Built as a learning project to think through agent architecture for high-volume customer service. Plain Python, Claude API, no orchestration framework — the control flow is intentionally legible.*

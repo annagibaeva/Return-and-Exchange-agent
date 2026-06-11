@@ -1,0 +1,106 @@
+"""
+agent.py — the primary agent: a Claude tool-calling loop.
+
+Flow: take the conversation, let Claude plan and call tools against the mock
+systems of record, loop until it produces a final text response. That response
+is then handed to the supervisor (see supervisor.py) before it would reach a
+customer.
+
+Plain Python and the Anthropic SDK — no orchestration framework.
+"""
+
+import json
+import os
+import yaml
+from pathlib import Path
+
+import anthropic
+from dotenv import load_dotenv
+
+import tools as toolbox
+
+load_dotenv()
+
+MODEL = "claude-sonnet-4-6"
+
+MAX_TURNS = 8
+
+POLICY = yaml.safe_load(open(Path(__file__).parent / "policy.yaml"))
+
+
+def _system_prompt():
+    from skills import assemble_skill_prompt
+
+    return f"""You are the customer-service agent for Singapore Apparel, an online retailer.
+You help customers with returns and exchanges. You are friendly, concise, and honest.
+
+Hard rules:
+- Always look up the order before making any claim about it.
+- Respect every eligibility verdict exactly. Never promise something policy forbids.
+- Never reveal order details unless the customer's identity matches the order.
+- Never issue refunds or goodwill credits yourself — these require human approval.
+- When unsure or when policy is exceeded, escalate to a human rather than improvise.
+
+Region return windows and rules are enforced by the tools; trust their verdicts.
+
+{assemble_skill_prompt()}
+
+When you have resolved the request or decided to escalate, give the customer a
+clear final message. Do not call more tools than you need."""
+
+
+def _run_tool(name, args):
+    """Dispatch a tool call, injecting policy where needed."""
+    fn = toolbox.TOOL_FUNCTIONS[name]
+    if name == "check_return_eligibility":
+        return fn(args["order_id"], args["sku"], POLICY)
+    return fn(**args)
+
+
+def run_agent(messages, client=None, verbose=False):
+    """
+    Run the agent loop over a list of {role, content} messages.
+    Returns (final_text, trace) where trace is the list of tool calls made.
+    """
+    client = client or anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    convo = list(messages)
+    trace = []
+
+    for _ in range(MAX_TURNS):
+        resp = client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            system=_system_prompt(),
+            tools=toolbox.TOOL_SCHEMAS,
+            messages=convo,
+        )
+
+        if resp.stop_reason == "tool_use":
+            convo.append({"role": "assistant", "content": resp.content})
+            tool_results = []
+            for block in resp.content:
+                if block.type == "tool_use":
+                    result = _run_tool(block.name, block.input)
+                    trace.append({"tool": block.name, "input": block.input, "result": result})
+                    if verbose:
+                        print(f"  -> {block.name}({block.input}) = {json.dumps(result)[:120]}")
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result),
+                    })
+            convo.append({"role": "user", "content": tool_results})
+            continue
+
+        # Final text response
+        final_text = "".join(b.text for b in resp.content if b.type == "text")
+        return final_text, trace
+
+    return "I'm having trouble completing this — let me hand you to a human agent.", trace
+
+
+if __name__ == "__main__":
+    # Quick manual smoke test
+    msg = [{"role": "user", "content": "Hi, I'd like to return my running shoes from order NW-10021, they're too small."}]
+    text, trace = run_agent(msg, verbose=True)
+    print("\nAGENT:", text)
