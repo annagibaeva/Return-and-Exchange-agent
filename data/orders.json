@@ -13,7 +13,7 @@
   },
   "NW-10044": {
     "order_id": "NW-10044",
-    "customer_email": "j.okafor@example.com",
+    "customer_email": ""j.okafor@example.com,
     "customer_name": "James Okafor",
     "region": "Malaysia",
     "order_date": "2026-03-15",

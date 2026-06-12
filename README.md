@@ -82,7 +82,7 @@ Refunds and credits for inconvenience/goodwill are routed through approval gates
 ## Reliability: the eval harness
 
 This is required to measure success and impact of the agent, is it working as expected and solves the problem. 
- `evals/golden_set.jsonl` holds ~20 scored test conversations:
+ `evals/golden_set.jsonl` holds ~10 scored test conversations:
 
 - **Happy path** — in-window return, straightforward exchange
 - **Policy edge cases** — out-of-window return, final-sale item, region-specific rule
@@ -103,12 +103,20 @@ This is required to measure success and impact of the agent, is it working as ex
 ## Running it
 
 ```bash
+# 1. Install dependencies
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-...
-streamlit run app.py        # chat UI
-python evals/run_evals.py   # reliability suite
-```
 
+# 2. Add your API key — copy the template, then paste your key into .env
+cp .env.example .env          # Windows PowerShell: copy .env.example .env
+#    edit .env so it reads:  ANTHROPIC_API_KEY=sk-...
+
+# 3. Chat UI (Flask) — then open http://localhost:5000 in your browser
+python app.py
+
+# 4. Reliability suite
+python evals/run_evals.py                  # all suites
+python evals/run_evals.py --suite safety   # one suite only
+```
 ---
 
 ## What I'd add for a real production deployment
