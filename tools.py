@@ -13,13 +13,20 @@ checked by the supervisor and the evals).
 
 import json
 from datetime import date, datetime
+from functools import lru_cache
 from pathlib import Path
 
 DATA = Path(__file__).parent / "data"
 
 
+@lru_cache(maxsize=None)
 def _load(name):
-    with open(DATA / name) as f:
+    """Load and cache a JSON data file.
+
+    The mock data is read-only at runtime, so caching avoids re-reading and
+    re-parsing the same file on every tool call.
+    """
+    with open(DATA / name, encoding="utf-8") as f:
         return json.load(f)
 
 
