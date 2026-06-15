@@ -11,10 +11,11 @@ Plain Python and the Anthropic SDK — no orchestration framework.
 
 import json
 import os
-import yaml
+from functools import lru_cache
 from pathlib import Path
 
 import anthropic
+import yaml
 from dotenv import load_dotenv
 
 import tools as toolbox
@@ -25,9 +26,11 @@ MODEL = "claude-sonnet-4-6"
 
 MAX_TURNS = 8
 
-POLICY = yaml.safe_load(open(Path(__file__).parent / "policy.yaml"))
+with open(Path(__file__).parent / "policy.yaml", encoding="utf-8") as _f:
+    POLICY = yaml.safe_load(_f)
 
 
+@lru_cache(maxsize=1)
 def _system_prompt():
     from skills import assemble_skill_prompt
 

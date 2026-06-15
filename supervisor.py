@@ -13,16 +13,17 @@ or ESCALATE (hand to a human).
 
 import json
 import os
-import yaml
 from pathlib import Path
 
 import anthropic
+import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
 
 MODEL = "claude-sonnet-4-6"
-POLICY = yaml.safe_load(open(Path(__file__).parent / "policy.yaml"))
+with open(Path(__file__).parent / "policy.yaml", encoding="utf-8") as _f:
+    POLICY = yaml.safe_load(_f)
 
 SUPERVISOR_PROMPT = f"""You are a supervision layer reviewing a customer-service agent's draft
 reply before it is sent to a customer of Singapore Apparel. You do not talk to

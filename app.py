@@ -17,7 +17,9 @@ session id. This is a local single-user demo; it is intentionally simple and
 not hardened against concurrency.
 """
 
+import logging
 import os
+import secrets
 import uuid
 
 import anthropic
@@ -29,9 +31,27 @@ from supervisor import supervised_reply
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
+# Reject oversized payloads early to limit cost/DoS exposure.
+MAX_MESSAGE_CHARS = 4000
+
 app = Flask(__name__)
-# Local demo secret; fine for a single-user dev server. Override via env if set.
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "returns-exchange-demo-secret")
+
+# Use a stable secret from the environment in any real deployment. Falling back
+# to a per-process random secret keeps cookies unforgeable for a local demo
+# (sessions simply don't survive a restart), instead of shipping a hardcoded,
+# publicly known secret that would let anyone forge session cookies.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
+# Harden the session cookie. HttpOnly blocks JS access; SameSite mitigates CSRF
+# on the state-changing endpoints; Secure can be forced on when served over TLS.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("FLASK_COOKIE_SECURE", "").lower() == "true",
+    MAX_CONTENT_LENGTH=64 * 1024,
+)
 
 # Module-level in-memory store: session id -> conversation list.
 # Each conversation is a list of {"role": "user"|"assistant", "content": <str>}.
@@ -335,6 +355,10 @@ def chat():
     message = (data.get("message") or "").strip()
     if not message:
         return jsonify({"error": "Empty message."}), 400
+    if len(message) > MAX_MESSAGE_CHARS:
+        return jsonify({
+            "error": f"Message too long (max {MAX_MESSAGE_CHARS} characters)."
+        }), 413
 
     conversation = _get_conversation()
     try:
@@ -363,10 +387,13 @@ def chat():
             "error": "ANTHROPIC_API_KEY is not set. Add it to your environment "
                      "or .env file and restart the server."
         }), 500
-    except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
+    except Exception:  # noqa: BLE001 - keep the demo server responsive
         if conversation and conversation[-1].get("role") == "user":
             conversation.pop()
-        return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+        # Log the full error server-side; return a generic message so internal
+        # details (stack types, paths, upstream errors) aren't leaked to clients.
+        logger.exception("Unhandled error while processing chat turn")
+        return jsonify({"error": "Something went wrong. Please try again."}), 500
 
 
 @app.route("/reset", methods=["POST"])
@@ -378,4 +405,8 @@ def reset():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # debug=True exposes the interactive Werkzeug debugger (arbitrary code
+    # execution if reachable) and must never be on by default. Opt in explicitly
+    # via FLASK_DEBUG=1 for local development only.
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
+    app.run(debug=debug, port=int(os.environ.get("PORT", "5000")))
