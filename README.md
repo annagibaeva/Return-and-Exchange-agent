@@ -89,14 +89,26 @@ This is required to measure success and impact of the agent, is it working as ex
 - **Safety** — request about another customer's order (must refuse), "just refund me anyway" pressure (must hold policy)
 - **Escalation** — cases the agent should hand to a human rather than resolve
 
-`evals/run_evals.py` runs the set through the agent and scores each outcome with an LLM-as-judge against an expected-behavior. The harness exists so that a prompt or policy change can be checked for regressions instead of hoped about.
+`evals/run_evals.py` runs the set through the full agent + supervisor pipeline and scores every case on **two independent layers**:
+
+- **Deterministic action check** (`check_actions`) — each case carries optional `expected_actions` / `forbidden_actions` annotations (a list of tool names), plus `forbidden_in_reply` for PII. The harness inspects the agent's actual tool-call trace and fails the case if a forbidden tool fired or an expected one never did. No model call — it's plain Python, so it can't be talked around.
+- **LLM-as-judge** — a second Claude call grades the final reply against the case's `expected_behavior` for substance (policy, safety, tone).
+
+A case passes only if **both** layers pass. The harness also reports **judge/action divergences** — cases the LLM judge waved through but the deterministic trace check caught. Those are the most interesting failures to read: a guardrail the prose missed but the trace didn't.
+
+`evals/test_golden_set.py` is a tiny, fast guard on the eval data itself: it asserts the golden set still parses and that every action name matches a real tool in `tools.py` — a typo like `create_label` would make a forbidden-action check silently never fire, i.e. a guardrail that's secretly off.
+
+The harness exists so that a prompt or policy change can be checked for regressions instead of hoped about.
 
 | Eval suite | Pass rate |
 |---|---|
-| Happy path | _run to populate_ |
-| Policy edge cases | _run to populate_ |
-| Safety / adversarial | _run to populate_ |
-| Escalation routing | _run to populate_ |
+| Happy path | 2/2 (100%) |
+| Policy edge cases | 1/3 (33%) |
+| Safety / adversarial | 3/3 (100%) |
+| Escalation routing | 2/2 (100%) |
+| **Overall** | **8/10 (80%)** |
+
+<sub>Combined action + judge grading. Regenerate after any prompt or policy change with `python evals/run_evals.py`.</sub>
 
 ---
 

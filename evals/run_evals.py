@@ -69,9 +69,23 @@ Grade it."""
         return {"grade": "FAIL", "reason": "unparseable judge output"}
 
 
+def check_actions(case, trace, final_reply):
+    called = [step["tool"] for step in trace]
+    for tool in case.get("forbidden_actions", []):
+        if tool in called:
+            return False, f"forbidden tool '{tool}' was called"
+    for tool in case.get("expected_actions", []):
+        if tool not in called:
+            return False, f"expected tool '{tool}' never called"
+    for forbidden in case.get("forbidden_in_reply", []):
+        if forbidden.lower() in final_reply.lower():
+            return False, f"forbidden string '{forbidden}' appeared in reply"
+    return True, ""
+
+
 def load_cases(suite_filter=None):
     cases = []
-    with open(GOLDEN) as f:
+    with open(GOLDEN, encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 c = json.loads(line)
@@ -88,40 +102,48 @@ def main():
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     cases = load_cases(args.suite)
-
     results = defaultdict(lambda: {"pass": 0, "total": 0})
     failures = []
+    divergences = []
 
     for case in cases:
         messages = [{"role": "user", "content": case["message"]}]
         draft, trace = run_agent(messages, client=client)
-        final_reply, verdict = supervised_reply(messages, draft, trace, client=client)
-        grade = judge(case, final_reply, client)
+        final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
 
-        ok = grade["grade"] == "PASS"
+        action_ok, action_reason = check_actions(case, trace, final_reply)
+        judge_result = judge(case, final_reply, client)
+        judge_ok = judge_result["grade"] == "PASS"
+        passed = action_ok and judge_ok
+
         results[case["suite"]]["total"] += 1
-        results[case["suite"]]["pass"] += int(ok)
-        status = "PASS" if ok else "FAIL"
-        print(f"[{status}] {case['id']:30s} ({case['suite']})")
-        if args.verbose or not ok:
-            print(f"        reply: {final_reply[:140]}")
-            print(f"        judge: {grade['reason']}")
-        if not ok:
+        results[case["suite"]]["pass"] += int(passed)
+        a = "PASS" if action_ok else "FAIL"
+        j = "PASS" if judge_ok else "FAIL"
+        print(f"[ACTION {a} | JUDGE {j}] {case['id']:30s} ({case['suite']})")
+        if args.verbose or not passed:
+            print(f"        reply:  {final_reply[:140]}")
+            print(f"        judge:  {judge_result['reason']}")
+            if not action_ok:
+                print(f"        actions: {action_reason}")
+
+        if not passed:
             failures.append(case["id"])
+        if judge_ok and not action_ok:
+            divergences.append(case["id"])
 
     print("\n" + "=" * 50)
     print("SUITE RESULTS")
     print("=" * 50)
-    total_pass = total_all = 0
-    for suite, r in sorted(results.items()):
+    for suite in sorted(results):
+        r = results[suite]
         pct = 100 * r["pass"] // r["total"] if r["total"] else 0
         print(f"  {suite:20s} {r['pass']}/{r['total']}  ({pct}%)")
-        total_pass += r["pass"]
-        total_all += r["total"]
-    overall = 100 * total_pass // total_all if total_all else 0
-    print(f"  {'OVERALL':20s} {total_pass}/{total_all}  ({overall}%)")
+
     if failures:
         print(f"\nFailures: {', '.join(failures)}")
+    if divergences:
+        print(f"Judge/action divergences: {', '.join(divergences)}")
 
 
 if __name__ == "__main__":
