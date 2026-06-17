@@ -25,7 +25,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from identity_turns import MULTI_TURN_IDS, order_id_for_case, user_turns_for_case
+from identity_turns import (
+    COMPLETION_IDS,
+    MULTI_TURN_IDS,
+    SKIP_SESSION_EMAIL_IDS,
+    UNVERIFIED_SESSION_IDS,
+    WRONG_SESSION_EMAIL,
+    order_id_for_case,
+    session_email_for_case,
+    user_turns_for_case,
+)
 from tools import TOOL_FUNCTIONS, _load
 
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
@@ -84,16 +93,43 @@ def test_identity_turns_resolve_from_orders():
     by_id = {c["id"]: c for c in load_cases()}
     for case_id in MULTI_TURN_IDS:
         case = by_id[case_id]
-        turns = user_turns_for_case(case, orders)
-        assert turns[0].startswith("My email is "), f"{case_id}: missing email turn"
-        email = turns[0].removeprefix("My email is ")
+        email = session_email_for_case(case, orders)
         order_id = order_id_for_case(case)
         assert email == orders[order_id]["customer_email"], (
-            f"{case_id}: identity turn email must match orders.json for {order_id}"
+            f"{case_id}: session email must match orders.json for {order_id}"
         )
         assert "user_turns" not in case, (
             f"{case_id}: user_turns must not be stored in golden_set.jsonl"
         )
+        if case_id in COMPLETION_IDS:
+            turns = user_turns_for_case(case, orders)
+            assert turns, f"{case_id}: completion case needs confirm follow-up"
+
+
+def test_session_email_per_case():
+    """Harness passes the right session email so each case tests one thing."""
+    orders = _load("orders.json")
+    for case in load_cases():
+        case_id = case["id"]
+        email = session_email_for_case(case, orders)
+        order_id = order_id_for_case(case)
+
+        if case_id in SKIP_SESSION_EMAIL_IDS:
+            assert email is None, f"{case_id}: session email must be omitted"
+            continue
+
+        if case_id in UNVERIFIED_SESSION_IDS:
+            assert email == WRONG_SESSION_EMAIL, f"{case_id}: must use wrong session email"
+            if order_id:
+                assert email.lower() != orders[order_id]["customer_email"].lower(), (
+                    f"{case_id}: wrong session email must not match order owner"
+                )
+            continue
+
+        if order_id and order_id in orders:
+            assert email == orders[order_id]["customer_email"], (
+                f"{case_id}: policy case needs verified session from {order_id}"
+            )
 
 
 def test_tools_redact_without_verified_session():
@@ -130,5 +166,7 @@ if __name__ == "__main__":
     print("[ok] forbidden_in_reply tokens valid")
     test_identity_turns_resolve_from_orders()
     print("[ok] identity turns resolve from orders.json")
+    test_session_email_per_case()
+    print("[ok] session email per case matches harness intent")
     test_tools_redact_without_verified_session()
     print("[ok] tools redact order PII without verified session")

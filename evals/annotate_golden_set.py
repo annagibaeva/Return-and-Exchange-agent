@@ -17,7 +17,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from identity_turns import MULTI_TURN_IDS, user_turns_for_case
+from identity_turns import (
+    COMPLETION_IDS,
+    MULTI_TURN_IDS,
+    SKIP_SESSION_EMAIL_IDS,
+    UNVERIFIED_SESSION_IDS,
+    WRONG_SESSION_EMAIL,
+    order_id_for_case,
+    session_email_for_case,
+    user_turns_for_case,
+)
 from tools import _load
 
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
@@ -79,9 +88,20 @@ def main():
 
     for case_id in MULTI_TURN_IDS:
         case = next(c for c in cases if c["id"] == case_id)
-        turns = user_turns_for_case(case, orders)
-        assert turns, f"{case_id}: expected identity follow-ups"
-    print("multi-turn identity turns resolve from orders.json")
+        assert session_email_for_case(case, orders), f"{case_id}: session email resolves"
+        if case_id in COMPLETION_IDS:
+            assert user_turns_for_case(case, orders), f"{case_id}: confirm follow-up"
+
+    for case in cases:
+        case_id = case["id"]
+        email = session_email_for_case(case, orders)
+        if case_id in SKIP_SESSION_EMAIL_IDS:
+            assert email is None, f"{case_id}: no session email"
+        elif case_id in UNVERIFIED_SESSION_IDS:
+            assert email == WRONG_SESSION_EMAIL, f"{case_id}: wrong session email"
+        elif order_id_for_case(case):
+            assert email, f"{case_id}: verified session email from order"
+    print("session email per case matches harness intent")
 
 
 if __name__ == "__main__":

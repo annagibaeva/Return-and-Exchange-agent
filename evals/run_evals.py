@@ -27,7 +27,7 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from agent import run_agent
-from identity_turns import user_turns_for_case
+from identity_turns import session_email_for_case, user_turns_for_case
 from supervisor import supervised_reply
 from tools import _load
 
@@ -131,15 +131,20 @@ def run_conversation(case, client, orders):
     """Run the opening message plus scripted follow-ups; accumulate tool trace."""
     messages = [{"role": "user", "content": case["message"]}]
     trace = []
+    session_email = session_email_for_case(case, orders)
 
-    draft, turn_trace = run_agent(messages, client=client)
+    draft, turn_trace = run_agent(
+        messages, client=client, session_customer_email=session_email
+    )
     trace.extend(turn_trace)
     final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
 
     for turn in user_turns_for_case(case, orders)[:MAX_USER_TURNS]:
         messages.append({"role": "assistant", "content": final_reply})
         messages.append({"role": "user", "content": turn})
-        draft, turn_trace = run_agent(messages, client=client)
+        draft, turn_trace = run_agent(
+            messages, client=client, session_customer_email=session_email
+        )
         trace.extend(turn_trace)
         final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
 
