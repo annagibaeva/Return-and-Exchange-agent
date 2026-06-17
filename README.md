@@ -113,7 +113,7 @@ The harness exists so that a prompt or policy change can be checked for regressi
 
 ## Learnings: 
 
-Single -tune eval can't score multi step completion. 4/5 failures are agent stopping after lookup_order to verify identity. This is correct production behaviou as per policy. The Agent pauses to gather required infomrmation, single turn-eval gives it no second turn, so correct behaviour scores as 0%. Identity verification is a desgin decision. Action scoring exposed that happy path and policy cases are unscoreable single turn- the agent correctly pauses to verify identity, and single-turn eval terminates before the task can complete.
+- Single -tune eval can't score multi step completion. 4/5 failures are agent stopping after lookup_order to verify identity. This is correct production behaviou as per policy. The Agent pauses to gather required infomrmation, single turn-eval gives it no second turn, so correct behaviour scores as 0%. Identity verification is a desgin decision. Action scoring exposed that happy path and policy cases are unscoreable single turn- the agent correctly pauses to verify identity, and single-turn eval terminates before the task can complete.
 image.png
 ---
 
