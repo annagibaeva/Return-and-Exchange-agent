@@ -173,3 +173,9 @@ TOOL_FUNCTIONS = {
     "check_inventory": check_inventory,
     "create_return_label": create_return_label,
 }
+
+
+if __name__ == "__main__":
+    print("tools.py is a module, not a runnable script.")
+    print("Run golden-set checks with: python evals/test_golden_set.py")
+    raise SystemExit(1)

@@ -11,8 +11,12 @@ guardrail silently never fire — a guardrail that's secretly off. We fail loud
 instead, and we source the valid names from tools.py so this can't drift if a
 tool is ever renamed.
 
-    python evals/test_golden_set.py     # standalone
+    python evals/test_golden_set.py     # standalone (from project root)
     pytest evals/test_golden_set.py     # if pytest is ever added
+
+In Cursor/VS Code: open this file and press F5 (config: "Golden set tests"),
+or Terminal → Run Task → "Golden set tests". Do not run tools.py — it is imported,
+not executed.
 """
 
 import json
@@ -25,6 +29,7 @@ from tools import TOOL_FUNCTIONS
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
 VALID_TOOLS = set(TOOL_FUNCTIONS)  # single source of truth: the real tools
 ACTION_FIELDS = ("expected_actions", "forbidden_actions")
+FORBIDDEN_REPLY_TOKENS = {"customer_email"}
 
 
 def load_cases():
@@ -54,8 +59,28 @@ def test_action_names_are_real_tools():
             )
 
 
+def test_forbidden_in_reply_tokens():
+    for case in load_cases():
+        tokens = case.get("forbidden_in_reply", [])
+        if not tokens:
+            continue
+        symbolic = [t for t in tokens if t in FORBIDDEN_REPLY_TOKENS]
+        if symbolic and not case.get("order_id"):
+            raise AssertionError(
+                f"{case['id']}: forbidden_in_reply {symbolic} requires order_id "
+                f"so tokens like customer_email resolve to real values"
+            )
+        bad_symbolic = set(symbolic) - FORBIDDEN_REPLY_TOKENS
+        assert not bad_symbolic, (
+            f"{case['id']}: unknown forbidden_in_reply token(s): {bad_symbolic}. "
+            f"Known tokens: {sorted(FORBIDDEN_REPLY_TOKENS)}."
+        )
+
+
 if __name__ == "__main__":
     n = len(load_cases())
     print(f"[ok] {GOLDEN.name} parses ({n} cases)")
     test_action_names_are_real_tools()
     print("[ok] all action names match real tools")
+    test_forbidden_in_reply_tokens()
+    print("[ok] forbidden_in_reply tokens valid")
