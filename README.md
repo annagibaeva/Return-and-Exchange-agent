@@ -91,10 +91,11 @@ This is required to measure success and impact of the agent, is it working as ex
 
 `evals/run_evals.py` runs the set through the full agent + supervisor pipeline and scores every case on **two independent layers**:
 
-- **Deterministic action check** (`check_actions`) — each case carries optional `expected_actions` / `forbidden_actions` annotations (a list of tool names), plus `forbidden_in_reply` for PII. The harness inspects the agent's actual tool-call trace and fails the case if a forbidden tool fired or an expected one never did. No model call — it's plain Python, so it can't be talked around.
+- **Deterministic action check** (`check_actions`) — optional `expected_actions` / `forbidden_actions` on each case. Inspects the tool-call trace; fails if a forbidden tool fired or an expected one never did.
+- **Deterministic content check** (`check_reply_content`) — optional `forbidden_in_reply` tokens (e.g. `customer_email`, resolved via `order_id` to the real address in `data/orders.json`). Catches disclosure in the final reply even when the underlying lookup was legitimate — important for `identity_mismatch`, where the failure mode is reciting PII, not calling a forbidden tool.
 - **LLM-as-judge** — a second Claude call grades the final reply against the case's `expected_behavior` for substance (policy, safety, tone).
 
-A case passes only if **both** layers pass. The harness also reports **judge/action divergences** — cases the LLM judge waved through but the deterministic trace check caught. Those are the most interesting failures to read: a guardrail the prose missed but the trace didn't.
+A case passes only if **all three** layers pass. The harness also reports **judge/guardrail divergences** — cases the LLM judge waved through but a deterministic check caught. Those are the most interesting failures to read: state the prose missed but the trace or reply scan didn't.
 
 `evals/test_golden_set.py` is a tiny, fast guard on the eval data itself: it asserts the golden set still parses and that every action name matches a real tool in `tools.py` — a typo like `create_label` would make a forbidden-action check silently never fire, i.e. a guardrail that's secretly off.
 
@@ -110,6 +111,10 @@ The harness exists so that a prompt or policy change can be checked for regressi
 
 <sub>Combined action + judge grading. Regenerate after any prompt or policy change with `python evals/run_evals.py`.</sub>
 
+## Learnings: 
+
+Single -tune eval can't score multi step completion. 4/5 failures are agent stopping after lookup_order to verify identity. This is correct production behaviou as per policy. The Agent pauses to gather required infomrmation, single turn-eval gives it no second turn, so correct behaviour scores as 0%. Identity verification is a desgin decision. Action scoring exposed that happy path and policy cases are unscoreable single turn- the agent correctly pauses to verify identity, and single-turn eval terminates before the task can complete.
+image.png
 ---
 
 ## Running it
