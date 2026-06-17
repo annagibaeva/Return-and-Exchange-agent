@@ -102,48 +102,49 @@ Identity follow-ups (email + confirmation) are **not** stored in `golden_set.jso
 
 | Eval suite | Before (single-turn) | After (multi-turn) |
 |---|---|---|
-| Happy path | 0/2 (0%) | 1/2 (50%) |
-| Policy edge cases | 0/3 (0%) | 0/3 (0%) |
+| Happy path | 0/2 (0%) | 1/2 (**50%**) |
+| Policy edge cases | 0/3 (0%) | 2/3 (**66%**) |
 | Safety / adversarial | 3/3 (100%) | 3/3 (100%) |
 | Escalation routing | 2/2 (100%) | 2/2 (100%) |
-| **Overall** | **5/10 (50%)** | **6/10 (60%)** |
+| **Overall** | **5/10 (50%)** | **8/10 (80%)** |
 
 <sub>Combined action + content + judge grading. Regenerate with `python evals/run_evals.py`.</sub>
 
-**Outcome:** **6/10 (60%)**, up from **5/10 (50%)**. Safety and escalation unchanged at 100%.
+**Outcome:** **8/10 (80%)**, up from **5/10 (50%)**. The headline fix is **0%/0% → 50%/66%** on happy path and policy edges — suites that were unscorable in single-turn because identity verification stopped the trace after `lookup_order`. Safety and escalation unchanged at 100%.
 
 **What improved**
 
 - **`happy_exchange_in_stock`** — full PASS. Multi-turn identity verification lets the agent reach `check_return_eligibility`, `check_inventory`, and `create_return_label`.
-- **`outside_return_window_singapore`** and **`final_sale_blocked`** — action and content checks now PASS once email is supplied; `check_return_eligibility` runs end-to-end.
+- **`outside_return_window_singapore`** and **`final_sale_blocked`** — full PASS once email is supplied; `check_return_eligibility` runs end-to-end and the agent declines correctly.
 - **Happy path** — 0/2 → 1/2. At least one return/exchange flow is scoreable in the harness.
+- **Policy edges** — 0/3 → 2/3. Two of three edge cases now pass all three scoring layers.
 
-**Still failing**
+**Still failing (2 cases, two different failure modes)**
 
-| Case | Layer | What happened |
+| Case | Layer | What it means |
 |---|---|---|
-| `happy_return_in_window` | ACTION | Agent asks refund vs exchange instead of calling `create_return_label`. Judge/action divergence. |
-| `outside_return_window_singapore` | JUDGE | Tool trace correct; supervisor escalates instead of declining on the Malaysia 14-day window. |
-| `final_sale_blocked` | JUDGE | Tool trace correct; supervisor escalates instead of explaining final-sale policy. |
-| `exchange_out_of_stock` | ACTION + JUDGE | Sequencing gap — eligibility confirmed in prose but `check_inventory` never called. No `user_turns` (not an identity case). |
+| `happy_return_in_window` | ACTION fail, JUDGE pass | **Judge/action divergence.** The agent confirms eligibility and sounds helpful, so the LLM judge passes — but the trace never calls `create_return_label`. The hybrid scorer catches what prose-only grading would miss; this is proof the three-layer harness earns its keep. |
+| `exchange_out_of_stock` | ACTION fail, JUDGE fail | **Real agent bug, newly visible.** The agent skips `check_return_eligibility` and misreads the order (claims size 9 is already on the order). Multi-turn identity turns let the harness reach the exchange step; the failure is incorrect sequencing and confused order state, not a scoring artefact. |
 
-**Failures this run:** `happy_return_in_window`, `outside_return_window_singapore`, `final_sale_blocked`, `exchange_out_of_stock`
+**Failures this run:** `happy_return_in_window`, `exchange_out_of_stock`
+
+**Judge/action divergences this run:** `happy_return_in_window`
 
 ---
 
 ## Learnings
 
-**Single-turn eval cannot score multi-step completion.** Baseline failures stopped after `lookup_order` to verify identity — correct production behaviour, but the harness gave no second turn, so happy path and policy edges scored 0%.
+**Single-turn eval cannot score multi-step completion.** Baseline failures stopped after `lookup_order` to verify identity — correct production behaviour, but the harness gave no second turn, so happy path and policy edges scored **0%/0%**.
 
-**Multi-turn harness closes the identity gap — partially.** Scripting email + confirm in `user_turns` lets action scoring see the full trace for cases like `happy_exchange_in_stock`. Policy-edge cases pass deterministic checks but can still fail the judge when the supervisor escalates instead of delivering the expected decline.
+**Multi-turn harness closes the identity gap.** Scripting email + confirm in `user_turns` lifts those suites to **50%/66%** — action scoring finally sees the full trace for return, exchange, and policy-decline flows.
 
-**Judge/action divergences are the most useful signal.** `happy_return_in_window` gets JUDGE PASS but ACTION FAIL — clarification feels reasonable while the trace never reaches `create_return_label`.
+**Judge/action divergences are the most useful signal.** `happy_return_in_window` gets JUDGE PASS but ACTION FAIL — the reply feels reasonable while the trace never reaches `create_return_label`. That split is exactly why the harness runs deterministic action checks alongside the LLM judge.
+
+**`exchange_out_of_stock` is a real bug the harness newly catches.** Once identity turns unblock the conversation, the agent misreads order line items and never calls `check_return_eligibility` or `check_inventory` — a sequencing and comprehension failure, not a scoring gap.
 
 **Safety and escalation hold.** All safety (3/3) and escalation (2/2) cases pass on all layers.
 
-**`exchange_out_of_stock` is a sequencing gap, not identity.** The agent skips `check_inventory` and asks a clarifying question instead — a distinct failure mode from the identity pause.
-
-**Next steps.** Tighten `happy_return_in_window` turns so the agent does not stall on refund vs exchange; run supervisor per turn (or pass full conversation) so policy declines are not replaced by escalation; add follow-ups for `exchange_out_of_stock` if needed.
+**Next steps.** Tighten `happy_return_in_window` so the agent calls `create_return_label` after confirmation; fix order-state handling in `exchange_out_of_stock` so eligibility and inventory checks run before offering alternatives.
 
 ---
 
@@ -166,6 +167,12 @@ python evals/run_evals.py --suite safety   # one suite only
 python evals/test_golden_set.py            # fast guard on eval data
 python evals/annotate_golden_set.py       # re-apply action annotations + verify identity turns
 ```
+
+---
+
+## Limitations
+
+Identity verification is enforced structurally at the tool layer: `lookup_order`, `check_return_eligibility`, and `create_return_label` redact order PII unless `session_customer_email` matches the order's `customer_email`. In production that value comes from the login session — session-bound customer ID with tools scoped to it — not from anything the customer types in chat. This demo has no auth endpoint; `run_agent` falls back to the latest email volunteered in the thread, which is a stand-in for eval multi-turn replay, not proof of identity. Prompt rules and the supervisor remain as defense-in-depth; they are not the primary guarantee.
 
 ---
 

@@ -96,6 +96,31 @@ def test_identity_turns_resolve_from_orders():
         )
 
 
+def test_tools_redact_without_verified_session():
+    import yaml
+    from pathlib import Path
+    from tools import check_return_eligibility, create_return_label, lookup_order
+
+    policy = yaml.safe_load(
+        (Path(__file__).parent.parent / "policy.yaml").read_text(encoding="utf-8")
+    )
+    order_id = "NW-10021"
+    email = _load("orders.json")[order_id]["customer_email"]
+
+    redacted = lookup_order(order_id)
+    assert redacted["found"] and not redacted.get("identity_verified")
+    assert "customer_email" not in redacted and "items" not in redacted
+
+    full = lookup_order(order_id, session_customer_email=email)
+    assert full.get("identity_verified") and "items" in full
+
+    blocked = check_return_eligibility(order_id, "SHOE-RUN-9", policy)
+    assert blocked["reason"] == "identity_not_verified"
+
+    label = create_return_label(order_id, "SHOE-RUN-9", "exchange")
+    assert label["reason"] == "identity_not_verified"
+
+
 if __name__ == "__main__":
     n = len(load_cases())
     print(f"[ok] {GOLDEN.name} parses ({n} cases)")
@@ -105,3 +130,5 @@ if __name__ == "__main__":
     print("[ok] forbidden_in_reply tokens valid")
     test_identity_turns_resolve_from_orders()
     print("[ok] identity turns resolve from orders.json")
+    test_tools_redact_without_verified_session()
+    print("[ok] tools redact order PII without verified session")

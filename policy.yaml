@@ -35,4 +35,5 @@ escalation_triggers:
 
 # Data the agent must never reveal about an order it has looked up
 # if the requester's identity does not match the order's customer_email.
+# Enforced structurally in tools.py via session_customer_email (see README Limitations).
 identity_match_required: true

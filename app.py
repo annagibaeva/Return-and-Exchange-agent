@@ -366,7 +366,11 @@ def chat():
         # 1. append the user's message
         conversation.append({"role": "user", "content": message})
         # 2. primary agent drafts a reply (with tool calls)
-        draft, trace = run_agent(conversation, client=client)
+        draft, trace = run_agent(
+            conversation,
+            client=client,
+            session_customer_email=session.get("customer_email"),
+        )
         # 3. supervisor audits the draft before it reaches the customer
         reply, verdict = supervised_reply(conversation, draft, trace, client=client)
         # 4. store the SUPERVISED reply (what the customer actually sees)

@@ -11,6 +11,7 @@ Plain Python and the Anthropic SDK — no orchestration framework.
 
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -52,22 +53,54 @@ When you have resolved the request or decided to escalate, give the customer a
 clear final message. Do not call more tools than you need."""
 
 
-def _run_tool(name, args):
-    """Dispatch a tool call, injecting policy where needed."""
+_EMAIL_FROM_MESSAGE = re.compile(
+    r"(?i)(?:my email is|email(?:\s+address)?(?:\s+is)?)\s+(\S+@\S+)"
+)
+
+
+def _session_customer_email(messages, session_customer_email=None):
+    """Auth-layer email, or the latest address the customer volunteered in chat."""
+    if session_customer_email:
+        return session_customer_email.strip()
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        match = _EMAIL_FROM_MESSAGE.search(content)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _run_tool(name, args, session_customer_email=None):
+    """Dispatch a tool call, injecting policy and session identity where needed."""
     fn = toolbox.TOOL_FUNCTIONS[name]
     if name == "check_return_eligibility":
-        return fn(args["order_id"], args["sku"], POLICY)
+        return fn(
+            args["order_id"],
+            args["sku"],
+            POLICY,
+            session_customer_email=session_customer_email,
+        )
+    if name in {"lookup_order", "create_return_label"}:
+        return fn(**args, session_customer_email=session_customer_email)
     return fn(**args)
 
 
-def run_agent(messages, client=None, verbose=False):
+def run_agent(messages, client=None, verbose=False, session_customer_email=None):
     """
     Run the agent loop over a list of {role, content} messages.
     Returns (final_text, trace) where trace is the list of tool calls made.
+
+    session_customer_email: verified address from the auth layer (login/session).
+    When omitted, the agent uses any email the customer volunteered in the thread.
     """
     client = client or anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     convo = list(messages)
     trace = []
+    verified_email = _session_customer_email(convo, session_customer_email)
 
     for _ in range(MAX_TURNS):
         resp = client.messages.create(
@@ -83,7 +116,9 @@ def run_agent(messages, client=None, verbose=False):
             tool_results = []
             for block in resp.content:
                 if block.type == "tool_use":
-                    result = _run_tool(block.name, block.input)
+                    result = _run_tool(
+                        block.name, block.input, session_customer_email=verified_email
+                    )
                     trace.append({"tool": block.name, "input": block.input, "result": result})
                     if verbose:
                         print(f"  -> {block.name}({block.input}) = {json.dumps(result)[:120]}")

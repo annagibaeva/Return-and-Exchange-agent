@@ -9,6 +9,10 @@ not the integrations themselves.
 Each tool returns plain dicts. The agent decides what to call and in what
 order; nothing here enforces sequencing on its own (that's the agent's job,
 checked by the supervisor and the evals).
+
+Order lookup, eligibility, and label creation accept session_customer_email
+(injected by agent.py from the auth layer). Without a verified match, PII is
+redacted — the guarantee is structural, not prompt-only.
 """
 
 import json
@@ -17,6 +21,25 @@ from functools import lru_cache
 from pathlib import Path
 
 DATA = Path(__file__).parent / "data"
+
+
+def _identity_redacted(order_id: str) -> dict:
+    """Order exists but the requester is not verified — no PII or line items."""
+    return {
+        "found": True,
+        "order_id": order_id.strip().upper(),
+        "identity_verified": False,
+        "message": "Order found. Verify the requester's email before sharing details.",
+    }
+
+
+def _identity_verified(order: dict, session_customer_email: str | None) -> bool:
+    if session_customer_email is None:
+        return False
+    return (
+        session_customer_email.strip().lower()
+        == order["customer_email"].strip().lower()
+    )
 
 
 @lru_cache(maxsize=None)
@@ -30,23 +53,38 @@ def _load(name):
         return json.load(f)
 
 
-def lookup_order(order_id: str) -> dict:
-    """Fetch an order by ID. Returns the order record or a not_found marker."""
+def lookup_order(order_id: str, session_customer_email: str | None = None) -> dict:
+    """Fetch an order by ID.
+
+    When session_customer_email is set (from the auth layer), full order details
+    are returned only if it matches the order's customer_email; otherwise a
+    redacted record is returned so the agent cannot leak PII through the tool.
+    """
     orders = _load("orders.json")
-    order = orders.get(order_id.strip().upper())
+    oid = order_id.strip().upper()
+    order = orders.get(oid)
     if not order:
         return {"found": False, "order_id": order_id}
-    return {"found": True, **order}
+    if not _identity_verified(order, session_customer_email):
+        return _identity_redacted(oid)
+    return {"found": True, "identity_verified": True, **order}
 
 
-def check_return_eligibility(order_id: str, sku: str, policy: dict) -> dict:
+def check_return_eligibility(
+    order_id: str,
+    sku: str,
+    policy: dict,
+    session_customer_email: str | None = None,
+) -> dict:
     """
     Decide whether a specific item on an order can be returned/exchanged,
     against the policy. Returns a structured verdict the agent must respect.
     """
-    order = lookup_order(order_id)
+    order = lookup_order(order_id, session_customer_email=session_customer_email)
     if not order["found"]:
         return {"eligible": False, "reason": "order_not_found"}
+    if not order.get("identity_verified"):
+        return {"eligible": False, "reason": "identity_not_verified"}
 
     item = next((i for i in order["items"] if i["sku"] == sku.strip().upper()), None)
     if not item:
@@ -99,11 +137,21 @@ def check_inventory(sku: str, size: str) -> dict:
     }
 
 
-def create_return_label(order_id: str, sku: str, resolution: str) -> dict:
+def create_return_label(
+    order_id: str,
+    sku: str,
+    resolution: str,
+    session_customer_email: str | None = None,
+) -> dict:
     """
     Generate a return/exchange label. State-changing — in production this
     would be idempotent and logged. resolution is 'refund' or 'exchange'.
     """
+    order = lookup_order(order_id, session_customer_email=session_customer_email)
+    if not order["found"]:
+        return {"label_created": False, "reason": "order_not_found"}
+    if not order.get("identity_verified"):
+        return {"label_created": False, "reason": "identity_not_verified"}
     return {
         "label_created": True,
         "order_id": order_id,
