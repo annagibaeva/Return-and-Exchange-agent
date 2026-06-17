@@ -103,18 +103,28 @@ The harness exists so that a prompt or policy change can be checked for regressi
 
 | Eval suite | Pass rate |
 |---|---|
-| Happy path | 2/2 (100%) |
-| Policy edge cases | 1/3 (33%) |
+| Happy path | 0/2 (0%) |
+| Policy edge cases | 0/3 (0%) |
 | Safety / adversarial | 3/3 (100%) |
 | Escalation routing | 2/2 (100%) |
-| **Overall** | **8/10 (80%)** |
+| **Overall** | **5/10 (50%)** |
 
 <sub>Combined action + judge grading. Regenerate after any prompt or policy change with `python evals/run_evals.py`.</sub>
 
-## Learnings: 
+## Learnings
 
-- Single -tune eval can't score multi step completion. 4/5 failures are agent stopping after lookup_order to verify identity. This is correct production behaviou as per policy. The Agent pauses to gather required infomrmation, single turn-eval gives it no second turn, so correct behaviour scores as 0%. Identity verification is a desgin decision. Action scoring exposed that happy path and policy cases are unscoreable single turn- the agent correctly pauses to verify identity, and single-turn eval terminates before the task can complete.
-image.png
+**Single-turn eval can't score multi-step completion.** Four of five failures stop after `lookup_order` to verify identity (name/email). That matches the agent's hard rule — never reveal order details unless identity matches — and is reasonable production behaviour. The harness gives one user message and one agent turn, so the agent pauses for information the customer never supplies, and correct behaviour scores as 0% on happy path and policy edge cases.
+
+**Identity verification is a design decision, not a bug.** Action scoring exposed that happy-path and policy-edge cases are unscoreable in a single turn: the agent correctly pauses to verify identity, and the eval terminates before the task can complete. Multi-turn golden cases (e.g. customer confirms email in turn 2), or cases where the initial message already includes verified identity, would align action scoring with intended production flow.
+
+**Judge/action divergences are the most useful signal.** Three failures (`happy_exchange_in_stock`, `happy_return_in_window`, `final_sale_blocked`) get **JUDGE PASS** but **ACTION FAIL**. The LLM judge treats identity verification as a reasonable security step; the deterministic action check requires `check_return_eligibility` in the same turn. That tension — conversational reasonableness vs. trace completeness — is exactly what the dual-layer harness is meant to surface.
+
+**Safety and escalation hold.** All safety (3/3) and escalation (2/2) cases pass on action, content, and judge layers. Policy holdouts, PII refusal, refund gating, and human routing work as designed.
+
+**`exchange_out_of_stock` is a sequencing gap, not identity.** This case is different: the agent calls `lookup_order`, confirms eligibility in prose, then asks a clarifying question instead of calling `check_inventory`. Stock was never verified — a real failure mode distinct from the identity-verification pause.
+
+**What I'd change next.** Extend the harness to support multi-turn conversations; add golden cases with identity pre-verified for end-to-end action scoring; treat judge/action divergences as first-class metrics in the summary output.
+
 ---
 
 ## Running it

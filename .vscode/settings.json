@@ -1,0 +1,8 @@
+{
+  "python.terminal.executeInFileDir": false,
+  "code-runner.executorMap": {
+    "python": "python -u $fullFileName"
+  },
+  "code-runner.fileDirectoryAsCwd": true,
+  "code-runner.runInTerminal": true
+}
