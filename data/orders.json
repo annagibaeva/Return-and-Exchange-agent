@@ -1,7 +1,7 @@
 {
   "NW-10021": {
     "order_id": "NW-10021",
-    "customer_email": "maya.t@example.com",
+    "customer_email": "maya.t@northweave.com",
     "customer_name": "Maya Tan",
     "region": "Singapore",
     "order_date": "2026-05-28",
@@ -13,7 +13,7 @@
   },
   "NW-10044": {
     "order_id": "NW-10044",
-    "customer_email": "j.okafor@example.com",
+    "customer_email": "j.okafor@northweave.com",
     "customer_name": "James Okafor",
     "region": "Malaysia",
     "order_date": "2026-03-15",
@@ -37,7 +37,7 @@
   },
   "NW-10088": {
     "order_id": "NW-10088",
-    "customer_email": "maya.t@example.com",
+    "customer_email": "maya.t@northweave.com",
     "customer_name": "Maya Tan",
     "region": "Singapore",
     "order_date": "2026-06-07",

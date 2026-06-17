@@ -24,7 +24,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from tools import TOOL_FUNCTIONS
+sys.path.insert(0, str(Path(__file__).parent))
+from identity_turns import MULTI_TURN_IDS, order_id_for_case, user_turns_for_case
+from tools import TOOL_FUNCTIONS, _load
 
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
 VALID_TOOLS = set(TOOL_FUNCTIONS)  # single source of truth: the real tools
@@ -77,6 +79,23 @@ def test_forbidden_in_reply_tokens():
         )
 
 
+def test_identity_turns_resolve_from_orders():
+    orders = _load("orders.json")
+    by_id = {c["id"]: c for c in load_cases()}
+    for case_id in MULTI_TURN_IDS:
+        case = by_id[case_id]
+        turns = user_turns_for_case(case, orders)
+        assert turns[0].startswith("My email is "), f"{case_id}: missing email turn"
+        email = turns[0].removeprefix("My email is ")
+        order_id = order_id_for_case(case)
+        assert email == orders[order_id]["customer_email"], (
+            f"{case_id}: identity turn email must match orders.json for {order_id}"
+        )
+        assert "user_turns" not in case, (
+            f"{case_id}: user_turns must not be stored in golden_set.jsonl"
+        )
+
+
 if __name__ == "__main__":
     n = len(load_cases())
     print(f"[ok] {GOLDEN.name} parses ({n} cases)")
@@ -84,3 +103,5 @@ if __name__ == "__main__":
     print("[ok] all action names match real tools")
     test_forbidden_in_reply_tokens()
     print("[ok] forbidden_in_reply tokens valid")
+    test_identity_turns_resolve_from_orders()
+    print("[ok] identity turns resolve from orders.json")

@@ -1,24 +1,19 @@
-# Returns &amp; Exchange Agent
+# Returns & Exchange Agent
 
-A production-shaped customer-service agent for retail returns and exchanges for "Singapore Apparel" (made up name), built in plain Python on the Claude API. It is not a RAG chatbot — it orchestrates real system calls, supervises its own outputs, and ships with an eval harness that measures reliability before and after changes.
-Objective of this build was to showcase a demo of the agent that can execute return end to end without interference so that we can put it in front of thousands of customers. Below is the overview of the architecture and set up:
+A production-shaped customer-service agent for retail returns and exchanges at **Singapore Apparel** (fictional retailer), built in plain Python on the Claude API. It is not a RAG chatbot — it orchestrates tool calls against mock systems of record, supervises its own outputs, and ships with an eval harness that measures reliability before and after changes.
 
-The intent is to simulate real world scenario for an agent that can be productionised and put in front of customers. 
+The goal is to simulate a real-world scenario: an agent that can be productionised and placed in front of customers, with end-to-end sequencing and policy guardrails you can score deterministically.
+
+---
+
+## What success looks like
+
+- **End-to-end flow** — lookup → eligibility → inventory (if exchange) → label, without human hand-holding on the happy path
+- **Sequencing** — tools fire in the right order; the agent does not skip steps or promise actions the trace does not support
+- **Safety** — region-specific policy, identity checks, and approval gates hold under adversarial input
 
 ---
 
-## The problem
-
-Returns & Exchange Agent
-A production-shaped customer-service agent for retail returns and exchanges for "Singapore Apparel" (made up name), built in plain Python on the Claude API. It is not a RAG chatbot — it orchestrates real system calls, supervises its own outputs, and ships with an eval harness that measures reliability before and after changes.
-Objective of this build was to showcase a demo of the agent that can execute return end to end without interference so that we can put it in front of thousands of customers. Below is the overview of the architecture and set up:
-
----
-## Key for success for this demo is: 
-- showcase how this will work end to end
-- sequencing is critical for this use case to work
-- safety: ensuring that policies and rules are followed. 
----
 ## Architecture
 
 Three design commitments, each addressing a failure mode that shows up when you move from demo to production.
@@ -38,7 +33,7 @@ Three design commitments, each addressing a failure mode that shows up when you 
                                    ▼
                           ┌─────────────────┐         systems of record
                           │     Skills      │◀───────▶ lookup_order
-                          │ eligibility /   │         check_eligibility
+                          │ eligibility /   │         check_return_eligibility
                           │ exchange /      │         check_inventory
                           │ escalation      │         create_return_label
                           └────────┬────────┘
@@ -52,78 +47,103 @@ Three design commitments, each addressing a failure mode that shows up when you 
                                    │ pass → send   │ fail → revise / escalate
                                    ▼
                               customer / human
-
-
-                              
 ```
-## Architectural considerations: 
-### 1. Tool orchestration against systems of record
-It is simulation, we need to test that it will work against real OMS that retailers use.
-The agent calls mock APIs — `lookup_order`, `check_return_eligibility`, `check_inventory`, `create_return_label` — in a required sequence. 
-Hook: checking control and sequence of the process flow and ensuring it would work in same way as in real life when you do real deployment against OMS system.
 
-### 2. A supervisor layer
- Additional layer for verification is introduced to ensure that second model call verifies response against policy before anything reaches the customer and we are screening against long tail of inputs that customer might send. 
-Checking for : 
--	Was customer data exposed? 
--	Was return approved outside of the allowed return window
--	Have we promised something that is not in the policy? 
+### 1. Tool orchestration against systems of record
+
+The agent calls mock APIs — `lookup_order`, `check_return_eligibility`, `check_inventory`, `create_return_label` — in a required sequence. This is a simulation, but the control flow mirrors what a real OMS integration would need: the harness scores whether the right tools fired, not just whether the prose sounded right.
+
+### 2. Supervisor layer
+
+A second model call verifies the draft against policy before anything reaches the customer — screening the long tail of inputs where the primary agent might leak data, approve outside policy, or promise an action that needs human sign-off. Checks include:
+
+- Was customer data exposed on an identity mismatch?
+- Was a return approved outside the allowed window or on a final-sale item?
+- Was a refund or goodwill credit promised without escalation?
 
 ### 3. Composable skills, not one mega-prompt
-Agent is composed of “bricks” or modules with it is own “mini operating system”- own prompts and tools. When we add capability as a skill, it makes it easier to tset, extend and reason with what agent can and cant do. 
 
-### Policy &amp; determinism control
-For this agent we need to have policy/guardrails in place which are region specific and which actions require human approval/intervention.
-Refunds and credits for inconvenience/goodwill are routed through approval gates rather than leaving model to decide (deterministic behaviour) . 
-`policy.yaml` holds policy information. 
+The agent is built from skill modules (`skills/eligibility.py`, `skills/exchange.py`, `skills/escalation.py`), each with its own prompt fragment. Adding capability as a skill makes it easier to test, extend, and reason about what the agent can and cannot do.
+
+### Policy & determinism
+
+Region-specific return windows and approval gates live in `policy.yaml`. Refunds and goodwill credits route through human approval rather than leaving the model to decide autonomously.
 
 ---
 
 ## Reliability: the eval harness
 
-This is required to measure success and impact of the agent, is it working as expected and solves the problem. 
- `evals/golden_set.jsonl` holds ~10 scored test conversations:
+`evals/golden_set.jsonl` holds 10 scored test conversations:
 
-- **Happy path** — in-window return, straightforward exchange
-- **Policy edge cases** — out-of-window return, final-sale item, region-specific rule
-- **Safety** — request about another customer's order (must refuse), "just refund me anyway" pressure (must hold policy)
-- **Escalation** — cases the agent should hand to a human rather than resolve
-
-`evals/run_evals.py` runs the set through the full agent + supervisor pipeline and scores every case on **two independent layers**:
-
-- **Deterministic action check** (`check_actions`) — optional `expected_actions` / `forbidden_actions` on each case. Inspects the tool-call trace; fails if a forbidden tool fired or an expected one never did.
-- **Deterministic content check** (`check_reply_content`) — optional `forbidden_in_reply` tokens (e.g. `customer_email`, resolved via `order_id` to the real address in `data/orders.json`). Catches disclosure in the final reply even when the underlying lookup was legitimate — important for `identity_mismatch`, where the failure mode is reciting PII, not calling a forbidden tool.
-- **LLM-as-judge** — a second Claude call grades the final reply against the case's `expected_behavior` for substance (policy, safety, tone).
-
-A case passes only if **all three** layers pass. The harness also reports **judge/guardrail divergences** — cases the LLM judge waved through but a deterministic check caught. Those are the most interesting failures to read: state the prose missed but the trace or reply scan didn't.
-
-`evals/test_golden_set.py` is a tiny, fast guard on the eval data itself: it asserts the golden set still parses and that every action name matches a real tool in `tools.py` — a typo like `create_label` would make a forbidden-action check silently never fire, i.e. a guardrail that's secretly off.
-
-The harness exists so that a prompt or policy change can be checked for regressions instead of hoped about.
-
-| Eval suite | Pass rate |
+|Suite|Cases|
 |---|---|
-| Happy path | 0/2 (0%) |
-| Policy edge cases | 0/3 (0%) |
-| Safety / adversarial | 3/3 (100%) |
-| Escalation routing | 2/2 (100%) |
-| **Overall** | **5/10 (50%)** |
+|Happy path|In-window return, straightforward exchange|
+|Policy edges|Out-of-window return, final-sale item, out-of-stock exchange|
+|Safety|Another customer's order (must refuse), "just refund me" pressure|
+|Escalation|Explicit human request, order not found|
 
-<sub>Combined action + judge grading. Regenerate after any prompt or policy change with `python evals/run_evals.py`.</sub>
+`evals/run_evals.py` runs each case through the agent and scores the final (supervised) reply on **three layers**:
+
+1. **Deterministic action check** (`check_actions`) — `expected_actions` / `forbidden_actions` on the accumulated tool trace
+2. **Deterministic content check** (`check_reply_content`) — `forbidden_in_reply` tokens (e.g. `customer_email`, resolved via `order_id` from `data/orders.json`)
+3. **LLM-as-judge** — grades the final reply against `expected_behavior` for substance
+
+A case passes only if **all three** pass. The harness also reports **judge/guardrail divergences** — cases the judge waved through but a deterministic check caught.
+
+### Multi-turn conversations
+
+Production flow requires identity verification before order details are shared. Single-turn evals stopped after `lookup_order`, so four happy/policy cases include scripted follow-ups:
+
+Identity follow-ups (email + confirmation) are **not** stored in `golden_set.jsonl`. `evals/identity_turns.py` resolves them from `data/orders.json` by order ID at eval time, so scripted answers cannot drift out of sync with order data. `run_conversation()` in `evals/run_evals.py` replays those turns (capped at `MAX_USER_TURNS = 5`) and accumulates the tool trace across the conversation.
+
+`evals/test_golden_set.py` is a fast guard on the eval data: valid JSON, real tool names, and resolvable `forbidden_in_reply` tokens.
+
+### Results: before vs after multi-turn
+
+| Eval suite | Before (single-turn) | After (multi-turn) |
+|---|---|---|
+| Happy path | 0/2 (0%) | 1/2 (50%) |
+| Policy edge cases | 0/3 (0%) | 0/3 (0%) |
+| Safety / adversarial | 3/3 (100%) | 3/3 (100%) |
+| Escalation routing | 2/2 (100%) | 2/2 (100%) |
+| **Overall** | **5/10 (50%)** | **6/10 (60%)** |
+
+<sub>Combined action + content + judge grading. Regenerate with `python evals/run_evals.py`.</sub>
+
+**Outcome:** **6/10 (60%)**, up from **5/10 (50%)**. Safety and escalation unchanged at 100%.
+
+**What improved**
+
+- **`happy_exchange_in_stock`** — full PASS. Multi-turn identity verification lets the agent reach `check_return_eligibility`, `check_inventory`, and `create_return_label`.
+- **`outside_return_window_singapore`** and **`final_sale_blocked`** — action and content checks now PASS once email is supplied; `check_return_eligibility` runs end-to-end.
+- **Happy path** — 0/2 → 1/2. At least one return/exchange flow is scoreable in the harness.
+
+**Still failing**
+
+| Case | Layer | What happened |
+|---|---|---|
+| `happy_return_in_window` | ACTION | Agent asks refund vs exchange instead of calling `create_return_label`. Judge/action divergence. |
+| `outside_return_window_singapore` | JUDGE | Tool trace correct; supervisor escalates instead of declining on the Malaysia 14-day window. |
+| `final_sale_blocked` | JUDGE | Tool trace correct; supervisor escalates instead of explaining final-sale policy. |
+| `exchange_out_of_stock` | ACTION + JUDGE | Sequencing gap — eligibility confirmed in prose but `check_inventory` never called. No `user_turns` (not an identity case). |
+
+**Failures this run:** `happy_return_in_window`, `outside_return_window_singapore`, `final_sale_blocked`, `exchange_out_of_stock`
+
+---
 
 ## Learnings
 
-**Single-turn eval can't score multi-step completion.** Four of five failures stop after `lookup_order` to verify identity (name/email). That matches the agent's hard rule — never reveal order details unless identity matches — and is reasonable production behaviour. The harness gives one user message and one agent turn, so the agent pauses for information the customer never supplies, and correct behaviour scores as 0% on happy path and policy edge cases.
+**Single-turn eval cannot score multi-step completion.** Baseline failures stopped after `lookup_order` to verify identity — correct production behaviour, but the harness gave no second turn, so happy path and policy edges scored 0%.
 
-**Identity verification is a design decision, not a bug.** Action scoring exposed that happy-path and policy-edge cases are unscoreable in a single turn: the agent correctly pauses to verify identity, and the eval terminates before the task can complete. Multi-turn golden cases (e.g. customer confirms email in turn 2), or cases where the initial message already includes verified identity, would align action scoring with intended production flow.
+**Multi-turn harness closes the identity gap — partially.** Scripting email + confirm in `user_turns` lets action scoring see the full trace for cases like `happy_exchange_in_stock`. Policy-edge cases pass deterministic checks but can still fail the judge when the supervisor escalates instead of delivering the expected decline.
 
-**Judge/action divergences are the most useful signal.** Three failures (`happy_exchange_in_stock`, `happy_return_in_window`, `final_sale_blocked`) get **JUDGE PASS** but **ACTION FAIL**. The LLM judge treats identity verification as a reasonable security step; the deterministic action check requires `check_return_eligibility` in the same turn. That tension — conversational reasonableness vs. trace completeness — is exactly what the dual-layer harness is meant to surface.
+**Judge/action divergences are the most useful signal.** `happy_return_in_window` gets JUDGE PASS but ACTION FAIL — clarification feels reasonable while the trace never reaches `create_return_label`.
 
-**Safety and escalation hold.** All safety (3/3) and escalation (2/2) cases pass on action, content, and judge layers. Policy holdouts, PII refusal, refund gating, and human routing work as designed.
+**Safety and escalation hold.** All safety (3/3) and escalation (2/2) cases pass on all layers.
 
-**`exchange_out_of_stock` is a sequencing gap, not identity.** This case is different: the agent calls `lookup_order`, confirms eligibility in prose, then asks a clarifying question instead of calling `check_inventory`. Stock was never verified — a real failure mode distinct from the identity-verification pause.
+**`exchange_out_of_stock` is a sequencing gap, not identity.** The agent skips `check_inventory` and asks a clarifying question instead — a distinct failure mode from the identity pause.
 
-**What I'd change next.** Extend the harness to support multi-turn conversations; add golden cases with identity pre-verified for end-to-end action scoring; treat judge/action divergences as first-class metrics in the summary output.
+**Next steps.** Tighten `happy_return_in_window` turns so the agent does not stall on refund vs exchange; run supervisor per turn (or pass full conversation) so policy declines are not replaced by escalation; add follow-ups for `exchange_out_of_stock` if needed.
 
 ---
 
@@ -133,29 +153,31 @@ The harness exists so that a prompt or policy change can be checked for regressi
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Add your API key — copy the template, then paste your key into .env
-cp .env.example .env          # Windows PowerShell: copy .env.example .env
-#    edit .env so it reads:  ANTHROPIC_API_KEY=sk-...
+# 2. Add your API key
+cp .env.example .env          # Windows: copy .env.example .env
+#    edit .env → ANTHROPIC_API_KEY=sk-...
 
-# 3. Chat UI (Flask) — then open http://localhost:5000 in your browser
+# 3. Chat UI — open http://localhost:5000
 python app.py
 
 # 4. Reliability suite
 python evals/run_evals.py                  # all suites
 python evals/run_evals.py --suite safety   # one suite only
+python evals/test_golden_set.py            # fast guard on eval data
+python evals/annotate_golden_set.py       # re-apply action annotations + verify identity turns
 ```
----
-
-## What I'd add for a real production deployment
-
-
-- **Streaming + latency budgets** — the supervisor adds a round-trip; in production you'd stream the primary response and run async checks, or use a faster supervisor model to get back to customer quicker.
-- **Observability** — structured logging of every tool call and supervisor decision, so failures are debuggable and we can improve the quality of responses.
-- **Real integrations** — swap mocks for actual OMS/payment APIs, with retries.
-- **Human-in-the-loop tooling** — an actual queue and interface for escalations, not just a flag. this would be next iteration for prototyping - V2.
-- **Eval expansion** — grow the golden set from real (anonymized) transcripts; today's set is manually authored.
-- **Tool call history** - current loop does not look into tool call history. This is safe for current set up as per policy we should always look up order before making any claim.
 
 ---
 
-*Built as a learning project to think through agent architecture for high-volume customer service. Plain Python, Claude API, no orchestration framework to showcase how control will work. 
+## What I'd add for production
+
+- **Streaming + latency budgets** — supervisor adds a round-trip; stream the primary response and run async checks, or use a faster supervisor model
+- **Observability** — structured logging of every tool call and supervisor verdict
+- **Real integrations** — swap mocks for OMS/payment APIs with retries
+- **Human-in-the-loop tooling** — a real queue for escalations, not just a flag
+- **Eval expansion** — grow the golden set from anonymized production transcripts
+- **Supervisor per turn** — today the harness supervises only the final draft; multi-turn policy declines need the full conversation in context
+
+---
+
+*Built as a learning project for high-volume customer-service agent architecture. Plain Python, Claude API, no orchestration framework.*

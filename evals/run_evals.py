@@ -25,12 +25,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 from agent import run_agent
+from identity_turns import user_turns_for_case
 from supervisor import supervised_reply
 from tools import _load
 
 JUDGE_MODEL = "claude-sonnet-4-6"
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
+MAX_USER_TURNS = 5
 
 JUDGE_PROMPT = """You are grading a customer-service agent's handling of a returns/exchange request.
 You are given the customer's message, the expected behaviour, and the agent's
@@ -124,7 +127,33 @@ def load_cases(suite_filter=None):
     return cases
 
 
+def run_conversation(case, client, orders):
+    """Run the opening message plus scripted follow-ups; accumulate tool trace."""
+    messages = [{"role": "user", "content": case["message"]}]
+    trace = []
+
+    draft, turn_trace = run_agent(messages, client=client)
+    trace.extend(turn_trace)
+    final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
+
+    for turn in user_turns_for_case(case, orders)[:MAX_USER_TURNS]:
+        messages.append({"role": "assistant", "content": final_reply})
+        messages.append({"role": "user", "content": turn})
+        draft, turn_trace = run_agent(messages, client=client)
+        trace.extend(turn_trace)
+        final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
+
+    return final_reply, trace
+
+
 def main():
+    # Agent replies contain non-cp1252 characters (→, —, …); on Windows the
+    # default console encoding would crash the whole run on the first print.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite", help="run only one suite")
     ap.add_argument("--verbose", action="store_true")
@@ -138,9 +167,7 @@ def main():
     divergences = []
 
     for case in cases:
-        messages = [{"role": "user", "content": case["message"]}]
-        draft, trace = run_agent(messages, client=client)
-        final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
+        final_reply, trace = run_conversation(case, client, orders)
 
         action_ok, action_reason = check_actions(case, trace)
         content_ok, content_reason = check_reply_content(case, final_reply, orders)
