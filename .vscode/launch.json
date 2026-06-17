@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Golden set tests",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/evals/test_golden_set.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Run evals",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/evals/run_evals.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
