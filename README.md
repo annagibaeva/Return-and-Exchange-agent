@@ -132,6 +132,34 @@ Identity follow-ups (email + confirmation) are **not** stored in `golden_set.jso
 
 ---
 
+## Pass^k reliability scoring
+
+**Why does it matter** Average pass rates hide unreliability of your agent. An agent that passes 80% of the time per attempt looks fine on a single run but fails one in five customers — unacceptable at production scale. pass^k asks a stricter question: across k identical runs, does the case pass every time? Agent needs to work on any run whether it is reporting pass@1 (single attempt), mean pass-rate, and pass^5. Objective is to ensure that there is no gap between "usually works" and "reliably works" visible — this is matters for trust.
+
+**What i did**
+1. Single-turn eval structurally couldn't score task completion — the agent pauses to verify identity, and the conversation ended before it could finish (happy_path and policy_edges scored 0%).
+2. Built a scripted multi-turn harness so cases run to completion.
+3. Hybrid action+judge scoring exposed two real bugs the LLM judge alone missed: an inventory misreport on exchange_out_of_stock, and a return-completion failure on happy_return_in_window.
+4. Fixed both.
+5. pass^5 now 100% across all 10 cases at temperature 1.0.
+6. Next: adversarial cases to find where it breaks.
+
+**Results (temperature 1.0, k=5)**
+escalation     pass^5: 2/2 (100%)   mean 1.00
+happy_path     pass^5: 2/2 (100%)   mean 1.00
+policy_edges   pass^5: 3/3 (100%)   mean 1.00
+safety         pass^5: 3/3 (100%)   mean 1.00
+
+**What it means**: A perfect score is not proof of a good agent — it usually means the eval isn't hard enough yet. Ten passing cases show where the agent works, not where it breaks. What makes the 100% credible is that this harness has already caught real failures: the two bugs above failed visibly, action-scoring flagged them, and the green is the result of fixing them — not of a test too weak to fail. An eval that has never caught anything hasn't been shown capable of catching anything.
+
+**Three design decisions there were important.**
+
+**Temperature**. The agent runs at the SDK default (1.0), not 0. This matters: at temperature 0, k=5 would be near-deterministic and 100% pass^5 would measure decoding stability, not behavioral reliability. At 1.0, the agent faced genuine response variance across runs and stayed consistent — so the result reflects reliability, not determinism.
+**Cost**. k=5 × (agent + supervisor + judge), multi-turn, ≈ 170 model calls per full run. Run deliberately, not in a loop. (This sets up cost-per-resolution instrumentation next.)
+**Variance interpretation**. The split that matters: a case failing 0/5 is a consistent bug (fix the agent); a case at 3/5 is flaky (a reliability problem — does it skip a tool, or does the judge grade borderline tone differently?). Same low pass^5, opposite root cause — which an averaged score erases.
+
+**Next**: make the eval harder. The job now is to drive pass^5 below 100% with cases designed to break it — multi-constraint inputs mirroring τ-bench difficulty: a customer who gives the wrong order ID then corrects it, a partial email, a return-and-exchange in one message, code-switched English/Singlish (common in APAC). A 70% pass^5 on hard cases, analyzed, is worth more than 100% on easy ones.
+
 ## Learnings
 
 **Single-turn eval cannot score multi-step completion.** Baseline failures stopped after `lookup_order` to verify identity — correct production behaviour, but the harness gave no second turn, so happy path and policy edges scored **0%/0%**.
