@@ -122,7 +122,7 @@ def deterministic_verdict(customer_messages, draft_reply, trace):
     return None
 
 
-def review(customer_messages, draft_reply, trace, client=None):
+def review(customer_messages, draft_reply, trace, client=None, usage_tracker=None):
     """
     Audit a draft reply. Returns {"verdict", "reason"}.
     customer_messages: the conversation so far (list of {role, content} with string content)
@@ -159,6 +159,8 @@ Audit this draft. Respond with the JSON verdict only."""
         system=SUPERVISOR_PROMPT,
         messages=[{"role": "user", "content": audit_input}],
     )
+    if usage_tracker is not None:
+        usage_tracker.record("supervisor", MODEL, resp)
     raw = "".join(b.text for b in resp.content if b.type == "text").strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
     try:
@@ -171,12 +173,12 @@ Audit this draft. Respond with the JSON verdict only."""
         return {"verdict": "ESCALATE", "reason": "supervisor returned non-JSON"}
 
 
-def supervised_reply(customer_messages, draft_reply, trace, client=None):
+def supervised_reply(customer_messages, draft_reply, trace, client=None, usage_tracker=None):
     """
     Convenience wrapper: returns the message that should actually be sent,
     applying the supervisor's verdict.
     """
-    v = review(customer_messages, draft_reply, trace, client)
+    v = review(customer_messages, draft_reply, trace, client, usage_tracker=usage_tracker)
     if v["verdict"] == "PASS":
         return draft_reply, v
     if v["verdict"] == "ESCALATE":

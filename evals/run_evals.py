@@ -33,6 +33,7 @@ from agent import run_agent
 from identity_turns import session_email_for_case, user_turns_for_case
 from supervisor import supervised_reply
 from tools import _load
+from usage import UsageTracker
 
 JUDGE_MODEL = "claude-sonnet-4-6"
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
@@ -65,7 +66,7 @@ def _customer_transcript(messages):
     return "\n---\n".join(f"Turn {i + 1}: {t}" for i, t in enumerate(turns))
 
 
-def judge(case, final_reply, client, messages=None):
+def judge(case, final_reply, client, messages=None, usage_tracker=None):
     customer_block = (
         _customer_transcript(messages)
         if messages
@@ -87,6 +88,8 @@ Grade it."""
         system=JUDGE_PROMPT,
         messages=[{"role": "user", "content": inp}],
     )
+    if usage_tracker is not None:
+        usage_tracker.record("judge", JUDGE_MODEL, resp)
     raw = "".join(b.text for b in resp.content if b.type == "text").strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
     try:
@@ -149,17 +152,23 @@ def load_cases(suite_filter=None):
     return cases
 
 
-def run_conversation(case, client, orders, verbose=False):
+def run_conversation(case, client, orders, verbose=False, usage_tracker=None):
     """Run the opening message plus scripted follow-ups; accumulate tool trace."""
     messages = [{"role": "user", "content": case["message"]}]
     trace = []
     session_email = session_email_for_case(case, orders)
 
     draft, turn_trace = run_agent(
-        messages, client=client, session_customer_email=session_email, verbose=verbose
+        messages,
+        client=client,
+        session_customer_email=session_email,
+        verbose=verbose,
+        usage_tracker=usage_tracker,
     )
     trace.extend(turn_trace)
-    final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
+    final_reply, _verdict = supervised_reply(
+        messages, draft, trace, client=client, usage_tracker=usage_tracker
+    )
 
     for turn in user_turns_for_case(case, orders)[:MAX_USER_TURNS]:
         # Scripted follow-ups answer the agent's draft (e.g. refund vs exchange).
@@ -168,23 +177,35 @@ def run_conversation(case, client, orders, verbose=False):
         messages.append({"role": "assistant", "content": draft})
         messages.append({"role": "user", "content": turn})
         draft, turn_trace = run_agent(
-            messages, client=client, session_customer_email=session_email, verbose=verbose
+            messages,
+            client=client,
+            session_customer_email=session_email,
+            verbose=verbose,
+            usage_tracker=usage_tracker,
         )
         trace.extend(turn_trace)
-        final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
+        final_reply, _verdict = supervised_reply(
+            messages, draft, trace, client=client, usage_tracker=usage_tracker
+        )
 
     return final_reply, trace, messages
 
 
 def eval_single_run(case, client, orders, verbose=False):
     """Run one conversation and score all three layers."""
-    reply, trace, messages = run_conversation(case, client, orders, verbose=verbose)
+    usage_tracker = UsageTracker()
+    reply, trace, messages = run_conversation(
+        case, client, orders, verbose=verbose, usage_tracker=usage_tracker
+    )
     called = [step["tool"] for step in trace]
     action_ok, action_reason = check_actions(case, trace)
     content_ok, content_reason = check_reply_content(case, reply, orders)
-    judge_result = judge(case, reply, client, messages=messages)
+    judge_result = judge(
+        case, reply, client, messages=messages, usage_tracker=usage_tracker
+    )
     judge_ok = judge_result["grade"] == "PASS"
     passed = action_ok and content_ok and judge_ok
+    usage = usage_tracker.summary()
     return {
         "passed": passed,
         "reply": reply,
@@ -196,6 +217,7 @@ def eval_single_run(case, client, orders, verbose=False):
         "content_reason": content_reason,
         "judge_ok": judge_ok,
         "judge_reason": judge_result.get("reason", ""),
+        "usage": usage,
     }
 
 
@@ -211,8 +233,12 @@ def print_run_detail(case, run_idx, k, detail, verbose=False):
         f"judge={_layer_tag(detail['judge_ok'])}"
     )
     flag = "PASS" if detail["passed"] else "FAIL"
+    usage = detail["usage"]
     print(
-        f"  run {run_idx}/{k} [{flag}]  tools={detail['called']}  {layers}",
+        f"  run {run_idx}/{k} [{flag}]  tools={detail['called']}  {layers}  "
+        f"cost=${usage['cost_usd']:.4f}  "
+        f"tokens={usage['input_tokens']:,}in/{usage['output_tokens']:,}out  "
+        f"calls={usage['api_calls']}",
         flush=True,
     )
     if not detail["passed"] or verbose:
@@ -249,7 +275,110 @@ def eval_case_k(case, client, orders, k=DEFAULT_K, verbose=False):
         "pass^k": all(runs),
         "runs": runs,
         "details": details,
+        "usage": _aggregate_usage(details),
     }
+
+
+def _aggregate_usage(details):
+    total_cost = sum(d["usage"]["cost_usd"] for d in details)
+    total_in = sum(d["usage"]["input_tokens"] for d in details)
+    total_out = sum(d["usage"]["output_tokens"] for d in details)
+    total_calls = sum(d["usage"]["api_calls"] for d in details)
+    passed = [d for d in details if d["passed"]]
+    passed_cost = sum(d["usage"]["cost_usd"] for d in passed)
+    by_component: dict[str, dict] = {}
+    for detail in details:
+        for comp, stats in detail["usage"]["by_component"].items():
+            bucket = by_component.setdefault(
+                comp,
+                {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+            )
+            bucket["calls"] += stats["calls"]
+            bucket["input_tokens"] += stats["input_tokens"]
+            bucket["output_tokens"] += stats["output_tokens"]
+            bucket["cost_usd"] += stats["cost_usd"]
+    return {
+        "runs": len(details),
+        "passed_runs": len(passed),
+        "api_calls": total_calls,
+        "input_tokens": total_in,
+        "output_tokens": total_out,
+        "cost_usd": total_cost,
+        "passed_cost_usd": passed_cost,
+        "cost_per_solution_usd": total_cost / len(details) if details else 0.0,
+        "cost_per_pass_usd": passed_cost / len(passed) if passed else None,
+        "by_component": by_component,
+    }
+
+
+def _merge_usage(summaries):
+    merged = {
+        "runs": 0,
+        "passed_runs": 0,
+        "api_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "passed_cost_usd": 0.0,
+        "by_component": {},
+    }
+    for summary in summaries:
+        merged["runs"] += summary["runs"]
+        merged["passed_runs"] += summary["passed_runs"]
+        merged["api_calls"] += summary["api_calls"]
+        merged["input_tokens"] += summary["input_tokens"]
+        merged["output_tokens"] += summary["output_tokens"]
+        merged["cost_usd"] += summary["cost_usd"]
+        merged["passed_cost_usd"] += summary["passed_cost_usd"]
+        for comp, stats in summary["by_component"].items():
+            bucket = merged["by_component"].setdefault(
+                comp,
+                {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+            )
+            bucket["calls"] += stats["calls"]
+            bucket["input_tokens"] += stats["input_tokens"]
+            bucket["output_tokens"] += stats["output_tokens"]
+            bucket["cost_usd"] += stats["cost_usd"]
+    merged["cost_per_solution_usd"] = (
+        merged["cost_usd"] / merged["runs"] if merged["runs"] else 0.0
+    )
+    merged["cost_per_pass_usd"] = (
+        merged["passed_cost_usd"] / merged["passed_runs"]
+        if merged["passed_runs"]
+        else None
+    )
+    return merged
+
+
+def print_cost_summary(usage, k):
+    print("\n" + "=" * 50)
+    print("COST PER SOLUTION")
+    print("=" * 50)
+    print(
+        f"  Total: ${usage['cost_usd']:.4f}  "
+        f"({usage['input_tokens']:,} in / {usage['output_tokens']:,} out, "
+        f"{usage['api_calls']} API calls across {usage['runs']} solutions)"
+    )
+    print(
+        f"  Per solution (avg over k={k}): ${usage['cost_per_solution_usd']:.4f}"
+    )
+    if usage["cost_per_pass_usd"] is not None:
+        print(
+            f"  Per passing solution: ${usage['cost_per_pass_usd']:.4f} "
+            f"({usage['passed_runs']}/{usage['runs']} passed)"
+        )
+    else:
+        print("  Per passing solution: n/a (no passes)")
+    for comp in ("agent", "supervisor", "judge"):
+        stats = usage["by_component"].get(comp)
+        if not stats:
+            continue
+        print(
+            f"  {comp:12s} ${stats['cost_usd']:.4f}  "
+            f"({stats['calls']} calls, {stats['input_tokens']:,} in / "
+            f"{stats['output_tokens']:,} out)"
+        )
+    print("  (Sonnet 4.6 @ $3/MTok in, $15/MTok out; supervisor fast-path = $0)")
 
 
 def estimate_api_calls(cases, orders, k):
@@ -309,9 +438,11 @@ def main():
     )
     results = defaultdict(lambda: {"pass_hat_k": 0, "mean_sum": 0.0, "total": 0})
     failures = []
+    usage_summaries = []
 
     for case in cases:
         r = eval_case_k(case, client, orders, k=args.k, verbose=args.verbose)
+        usage_summaries.append(r["usage"])
 
         suite = results[case["suite"]]
         suite["total"] += 1
@@ -327,7 +458,8 @@ def main():
         print(
             f"[{flag}] {case['id']:30s} "
             f"mean={r['mean']:.2f}  pass^{args.k}={int(r['pass^k'])}  "
-            f"runs={['P' if x else 'F' for x in r['runs']]}  ({case['suite']})"
+            f"runs={['P' if x else 'F' for x in r['runs']]}  "
+            f"cost=${r['usage']['cost_usd']:.4f}  ({case['suite']})"
         )
 
         if not r["pass^k"]:
@@ -347,6 +479,8 @@ def main():
 
     if failures:
         print(f"\nNot pass^{args.k} (flaky or failing): {', '.join(failures)}")
+
+    print_cost_summary(_merge_usage(usage_summaries), args.k)
 
 
 if __name__ == "__main__":

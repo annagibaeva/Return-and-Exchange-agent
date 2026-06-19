@@ -73,7 +73,7 @@ Region-specific return windows and approval gates live in `policy.yaml`. Refunds
 
 ## Reliability: the eval harness
 
-`evals/golden_set.jsonl` holds 10 scored test conversations:
+`evals/golden_set.jsonl` holds 15 scored test conversations:
 
 |Suite|Cases|
 |---|---|
@@ -81,6 +81,7 @@ Region-specific return windows and approval gates live in `policy.yaml`. Refunds
 |Policy edges|Out-of-window return, final-sale item, out-of-stock exchange|
 |Safety|Another customer's order (must refuse), "just refund me" pressure|
 |Escalation|Explicit human request, order not found|
+|Adversarial|Wrong order ID then correction, return+exchange in one message, partial email, double pushback, Singlish/English|
 
 `evals/run_evals.py` runs each case through the agent and scores the final (supervised) reply on **three layers**:
 
@@ -155,10 +156,75 @@ safety         pass^5: 3/3 (100%)   mean 1.00
 **Three design decisions there were important.**
 
 **Temperature**. The agent runs at the SDK default (1.0), not 0. This matters: at temperature 0, k=5 would be near-deterministic and 100% pass^5 would measure decoding stability, not behavioral reliability. At 1.0, the agent faced genuine response variance across runs and stayed consistent — so the result reflects reliability, not determinism.
-**Cost**. k=5 × (agent + supervisor + judge), multi-turn, ≈ 170 model calls per full run. Run deliberately, not in a loop. (This sets up cost-per-resolution instrumentation next.)
+**Cost**. See [Cost per solution](#cost-per-solution) — the harness now bills every eval run from actual token usage.
 **Variance interpretation**. The split that matters: a case failing 0/5 is a consistent bug (fix the agent); a case at 3/5 is flaky (a reliability problem — does it skip a tool, or does the judge grade borderline tone differently?). Same low pass^5, opposite root cause — which an averaged score erases.
 
-**Next**: make the eval harder. The job now is to drive pass^5 below 100% with cases designed to break it — multi-constraint inputs mirroring τ-bench difficulty: a customer who gives the wrong order ID then corrects it, a partial email, a return-and-exchange in one message, code-switched English/Singlish (common in APAC). A 70% pass^5 on hard cases, analyzed, is worth more than 100% on easy ones.
+**Next**: run the adversarial suite at pass^5 and analyse where reliability breaks — a 70% pass^5 on hard cases, with cost data, is worth more than 100% on easy ones.
+
+---
+
+## Cost per solution
+
+Every eval run bills **actual API token usage** — not a call-count estimate. A *solution* is one full attempt to resolve a golden-set case: agent tool loop(s) + supervisor + judge, including scripted multi-turn follow-ups.
+
+`usage.py` records `input_tokens` / `output_tokens` from each Anthropic response. `run_evals.py` aggregates per run and prints a summary at the end.
+
+### What you get
+
+| Metric | Meaning |
+|---|---|
+| **Per solution** | Average cost across all k runs for the selected case(s) — passes and failures alike |
+| **Per passing solution** | Average cost only for runs that pass all three scoring layers |
+| **By component** | Split across `agent`, `supervisor`, and `judge` |
+
+### Example output
+
+```bash
+python evals/run_evals.py --case happy_return_in_window --k 1
+```
+
+```
+  run 1/1 [PASS]  ...  cost=$0.0740  tokens=20,379in/859out  calls=9
+
+==================================================
+COST PER SOLUTION
+==================================================
+  Total: $0.0740  (20,379 in / 859 out, 9 API calls across 1 solutions)
+  Per solution (avg over k=1): $0.0740
+  Per passing solution: $0.0740 (1/1 passed)
+  agent        $0.0721  (8 calls, 19,972 in / 812 out)
+  judge        $0.0019  (1 calls, 407 in / 47 out)
+  (Sonnet 4.6 @ $3/MTok in, $15/MTok out; supervisor fast-path = $0)
+```
+
+### Where the cost goes
+
+- **Agent (~95%)** — dominates because each tool-loop iteration resends the system prompt and growing conversation. Multi-turn cases (2–3 scripted follow-ups) multiply agent calls.
+- **Judge (~3%)** — one Sonnet call per solution to grade the final reply.
+- **Supervisor ($0 when fast-path hits)** — deterministic checks (label confirmed in trace, out-of-stock handled) skip the LLM supervisor entirely. Only borderline drafts trigger a billed supervisor call.
+
+### Pricing assumptions
+
+Rates in `usage.py` (standard, pre-cache/batch):
+
+| Model | Input | Output |
+|---|---|---|
+| `claude-sonnet-4-6` | $3.00 / MTok | $15.00 / MTok |
+
+### Rough budgets
+
+| Run | Solutions | Estimated cost |
+|---|---|---|
+| Single case, k=1 | 1 | ~$0.05–0.10 |
+| Adversarial suite, k=5 | 25 | ~$1.50–2.50 |
+| Full harness (15 cases), k=5 | 75 | ~$5–8 |
+
+Run deliberately — not in a CI loop on every commit. Use `--k 1` for smoke tests, `--suite adversarial` to probe hard cases without billing the full set.
+
+```bash
+python evals/run_evals.py --suite adversarial --k 5   # cost + pass^5 on hard cases
+python evals/test_usage.py                            # unit tests for cost math
+```
 
 ## Learnings
 
@@ -189,10 +255,12 @@ cp .env.example .env          # Windows: copy .env.example .env
 # 3. Chat UI — open http://localhost:5000
 python app.py
 
-# 4. Reliability suite
+# 4. Reliability suite (prints cost-per-solution summary at the end)
 python evals/run_evals.py                  # all suites
-python evals/run_evals.py --suite safety   # one suite only
+python evals/run_evals.py --suite adversarial --k 5
+python evals/run_evals.py --case happy_return_in_window --k 1
 python evals/test_golden_set.py            # fast guard on eval data
+python evals/test_usage.py                 # cost tracking unit tests
 python evals/annotate_golden_set.py       # re-apply action annotations + verify identity turns
 ```
 
