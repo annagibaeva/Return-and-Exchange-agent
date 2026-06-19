@@ -20,6 +20,18 @@ COMPLETION_IDS = (
     "happy_return_in_window",
 )
 
+# Per-case follow-ups: session email is already verified, so these must NOT
+# restate identity ("that's me"). They should answer whatever the agent asked
+# on turn 1 (refund vs exchange, size choice) and nudge create_return_label.
+COMPLETION_FOLLOW_UPS = {
+    "happy_return_in_window": (
+        "Yes, a refund return is fine — please send the return label."
+    ),
+    "happy_exchange_in_stock": (
+        "Yes, size 10 please — go ahead with the exchange."
+    ),
+}
+
 # Verified session only — policy decline / stop-short on the opening turn.
 IDENTITY_ONLY_IDS = (
     "outside_return_window_singapore",
@@ -75,5 +87,5 @@ def user_turns_for_case(case, orders):
     if case["id"] not in MULTI_TURN_IDS:
         return []
     if case["id"] in COMPLETION_IDS:
-        return ["Yes, that's me — please go ahead and process it."]
+        return [COMPLETION_FOLLOW_UPS[case["id"]]]
     return []

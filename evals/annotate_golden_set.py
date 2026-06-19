@@ -58,12 +58,13 @@ annotations = {
     "order_not_found": {"forbidden_actions": ["check_return_eligibility", "create_return_label"], "expected_actions": ["lookup_order"]},
 }
 
+# Legacy reference only — follow-ups live in identity_turns.COMPLETION_FOLLOW_UPS.
+# Session email is injected by the harness; completion cases need a policy nudge only.
 user_turns = {
-    "happy_exchange_in_stock":          ["My email is maya.t@example.com", "Yes, size 10 please"],
-    "happy_return_in_window":           ["<email for NW-10088>", "Yes, please proceed"],
-    "outside_return_window_singapore":  ["<email for NW-10044>"],   # agent should still decline post-verify
-    "final_sale_blocked":               ["<email for NW-10067>"],   # agent should still decline post-verify
-    "exchange_out_of_stock":            ["<email for NW-10021>", "Yes, size 9"],
+    "happy_exchange_in_stock": ["Yes, size 10 please — go ahead with the exchange."],
+    "happy_return_in_window": [
+        "Yes, a refund return is fine — please send the return label."
+    ],
 }
 def main():
     orders = _load("orders.json")

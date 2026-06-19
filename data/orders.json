@@ -35,6 +35,18 @@
     "status": "delivered",
     "delivered_date": "2026-06-08"
   },
+  "NW-10099": {
+    "order_id": "NW-10099",
+    "customer_email": "maya.t@northweave.com",
+    "customer_name": "Maya Tan",
+    "region": "Singapore",
+    "order_date": "2026-05-28",
+    "items": [
+      {"sku": "SHOE-RUN-9", "name": "Trailblazer Running Shoe", "size": "10", "color": "Slate", "price": 120.00, "final_sale": false}
+    ],
+    "status": "delivered",
+    "delivered_date": "2026-06-02"
+  },
   "NW-10088": {
     "order_id": "NW-10088",
     "customer_email": "maya.t@northweave.com",

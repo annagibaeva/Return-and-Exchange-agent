@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from identity_turns import (
+    COMPLETION_FOLLOW_UPS,
     COMPLETION_IDS,
     MULTI_TURN_IDS,
     SKIP_SESSION_EMAIL_IDS,
@@ -104,6 +105,12 @@ def test_identity_turns_resolve_from_orders():
         if case_id in COMPLETION_IDS:
             turns = user_turns_for_case(case, orders)
             assert turns, f"{case_id}: completion case needs confirm follow-up"
+            assert turns == [COMPLETION_FOLLOW_UPS[case_id]], (
+                f"{case_id}: completion follow-up must match COMPLETION_FOLLOW_UPS"
+            )
+            assert "that's me" not in turns[0].lower(), (
+                f"{case_id}: session is pre-verified; follow-up must not restate identity"
+            )
 
 
 def test_session_email_per_case():
@@ -130,6 +137,27 @@ def test_session_email_per_case():
             assert email == orders[order_id]["customer_email"], (
                 f"{case_id}: policy case needs verified session from {order_id}"
             )
+
+
+def test_supervisor_fast_pass_for_label_in_trace():
+    from supervisor import deterministic_verdict
+
+    trace = [
+        {
+            "tool": "create_return_label",
+            "input": {"order_id": "NW-10088", "sku": "SOCK-WOOL-L", "resolution": "refund"},
+            "result": {
+                "label_created": True,
+                "rma": "RMA-10088-L-L",
+                "carrier": "ShipFast",
+            },
+        },
+    ]
+    draft = "Your return label is ready! RMA: RMA-10088-L-L via ShipFast."
+    assert deterministic_verdict([], draft, trace) == {
+        "verdict": "PASS",
+        "reason": "label confirmed in trace and draft",
+    }
 
 
 def test_tools_redact_without_verified_session():
@@ -168,5 +196,7 @@ if __name__ == "__main__":
     print("[ok] identity turns resolve from orders.json")
     test_session_email_per_case()
     print("[ok] session email per case matches harness intent")
+    test_supervisor_fast_pass_for_label_in_trace()
+    print("[ok] supervisor fast-pass for label in trace")
     test_tools_redact_without_verified_session()
     print("[ok] tools redact order PII without verified session")
