@@ -94,7 +94,7 @@ def _run_tool(name, args, session_customer_email=None):
     return fn(**args)
 
 
-def run_agent(messages, client=None, verbose=False, session_customer_email=None):
+def run_agent(messages, client=None, verbose=False, session_customer_email=None, usage_tracker=None):
     """
     Run the agent loop over a list of {role, content} messages.
     Returns (final_text, trace) where trace is the list of tool calls made.
@@ -115,6 +115,8 @@ def run_agent(messages, client=None, verbose=False, session_customer_email=None)
             tools=toolbox.TOOL_SCHEMAS,
             messages=convo,
         )
+        if usage_tracker is not None:
+            usage_tracker.record("agent", MODEL, resp)
 
         if resp.stop_reason == "tool_use":
             convo.append({"role": "assistant", "content": resp.content})
