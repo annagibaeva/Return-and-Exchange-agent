@@ -10,6 +10,9 @@ Run before and after any prompt or policy change to catch regressions.
 
     python evals/run_evals.py
     python evals/run_evals.py --suite safety   # one suite only
+    python evals/run_evals.py --case exchange_out_of_stock --k 5
+    python evals/run_evals.py --case happy_return_in_window --k 1 --verbose
+    python evals/run_evals.py --filter happy_return_in_window --k 3  # alias for --case
 """
 
 import argparse
@@ -34,6 +37,7 @@ from tools import _load
 JUDGE_MODEL = "claude-sonnet-4-6"
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
 MAX_USER_TURNS = 5
+DEFAULT_K = 5  # use --k 5 for pass^k reliability (much more expensive)
 
 JUDGE_PROMPT = """You are grading a customer-service agent's handling of a returns/exchange request.
 You are given the customer's message, the expected behaviour, and the agent's
@@ -127,28 +131,116 @@ def load_cases(suite_filter=None):
     return cases
 
 
-def run_conversation(case, client, orders):
+def run_conversation(case, client, orders, verbose=False):
     """Run the opening message plus scripted follow-ups; accumulate tool trace."""
     messages = [{"role": "user", "content": case["message"]}]
     trace = []
     session_email = session_email_for_case(case, orders)
 
     draft, turn_trace = run_agent(
-        messages, client=client, session_customer_email=session_email
+        messages, client=client, session_customer_email=session_email, verbose=verbose
     )
     trace.extend(turn_trace)
     final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
 
     for turn in user_turns_for_case(case, orders)[:MAX_USER_TURNS]:
-        messages.append({"role": "assistant", "content": final_reply})
+        # Scripted follow-ups answer the agent's draft (e.g. refund vs exchange).
+        # Using the supervised reply here breaks continuity when turn 1 gets REVISE
+        # because the customer would be replying to a generic escalation stub.
+        messages.append({"role": "assistant", "content": draft})
         messages.append({"role": "user", "content": turn})
         draft, turn_trace = run_agent(
-            messages, client=client, session_customer_email=session_email
+            messages, client=client, session_customer_email=session_email, verbose=verbose
         )
         trace.extend(turn_trace)
         final_reply, _verdict = supervised_reply(messages, draft, trace, client=client)
 
     return final_reply, trace
+
+
+def eval_single_run(case, client, orders, verbose=False):
+    """Run one conversation and score all three layers."""
+    reply, trace = run_conversation(case, client, orders, verbose=verbose)
+    called = [step["tool"] for step in trace]
+    action_ok, action_reason = check_actions(case, trace)
+    content_ok, content_reason = check_reply_content(case, reply, orders)
+    judge_result = judge(case, reply, client)
+    judge_ok = judge_result["grade"] == "PASS"
+    passed = action_ok and content_ok and judge_ok
+    return {
+        "passed": passed,
+        "reply": reply,
+        "trace": trace,
+        "called": called,
+        "action_ok": action_ok,
+        "action_reason": action_reason,
+        "content_ok": content_ok,
+        "content_reason": content_reason,
+        "judge_ok": judge_ok,
+        "judge_reason": judge_result.get("reason", ""),
+    }
+
+
+def _layer_tag(ok):
+    return "PASS" if ok else "FAIL"
+
+
+def print_run_detail(case, run_idx, k, detail, verbose=False):
+    """Emit one run's scorecard immediately (flushed for live monitoring)."""
+    layers = (
+        f"action={_layer_tag(detail['action_ok'])} "
+        f"content={_layer_tag(detail['content_ok'])} "
+        f"judge={_layer_tag(detail['judge_ok'])}"
+    )
+    flag = "PASS" if detail["passed"] else "FAIL"
+    print(
+        f"  run {run_idx}/{k} [{flag}]  tools={detail['called']}  {layers}",
+        flush=True,
+    )
+    if not detail["passed"] or verbose:
+        if not detail["action_ok"] and detail["action_reason"]:
+            print(f"    action: {detail['action_reason']}", flush=True)
+        if not detail["content_ok"] and detail["content_reason"]:
+            print(f"    content: {detail['content_reason']}", flush=True)
+        if not detail["judge_ok"] and detail["judge_reason"]:
+            print(f"    judge: {detail['judge_reason']}", flush=True)
+        if not detail["passed"]:
+            print(f"    reply: {detail['reply'][:300]}", flush=True)
+        if verbose:
+            for step in detail["trace"]:
+                result_preview = json.dumps(step["result"])[:120]
+                print(
+                    f"    -> {step['tool']}({step['input']}) = {result_preview}",
+                    flush=True,
+                )
+            print(f"    reply: {detail['reply'][:400]}", flush=True)
+
+
+def eval_case_k(case, client, orders, k=DEFAULT_K, verbose=False):
+    runs = []
+    details = []
+    print(f"\n--- {case['id']} ({case['suite']}) × k={k} ---", flush=True)
+    for i in range(k):
+        detail = eval_single_run(case, client, orders, verbose=verbose)
+        details.append(detail)
+        runs.append(detail["passed"])
+        print_run_detail(case, i + 1, k, detail, verbose=verbose)
+    return {
+        "pass@1": runs[0],
+        "mean": sum(runs) / k,
+        "pass^k": all(runs),
+        "runs": runs,
+        "details": details,
+    }
+
+
+def estimate_api_calls(cases, orders, k):
+    """Rough lower-bound: one agent+supervisor stage per conv turn, plus judge per run."""
+    conv_stages = sum(
+        1 + len(user_turns_for_case(case, orders)[:MAX_USER_TURNS])
+        for case in cases
+    )
+    return k * (conv_stages * 2 + len(cases))  # agent+supervisor per stage, judge per case-run
 
 
 def main():
@@ -161,57 +253,82 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite", help="run only one suite")
-    ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--case",
+        "--filter",
+        dest="case",
+        help="run only one case id (e.g. happy_return_in_window)",
+    )
+    ap.add_argument(
+        "--k",
+        type=int,
+        default=DEFAULT_K,
+        metavar="N",
+        help=f"runs per case for pass^N reliability (default: {DEFAULT_K}; use 5 for full harness)",
+    )
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print tool trace and full reply for every run (failures always show reasons)",
+    )
     args = ap.parse_args()
+
+    if args.k < 1:
+        ap.error("--k must be at least 1")
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     cases = load_cases(args.suite)
+    if args.case:
+        cases = [c for c in cases if c["id"] == args.case]
+        if not cases:
+            ap.error(f"unknown case id: {args.case!r}")
     orders = _load("orders.json")
-    results = defaultdict(lambda: {"pass": 0, "total": 0})
+    est_calls = estimate_api_calls(cases, orders, args.k)
+    print(
+        f"Evaluating {len(cases)} case(s) × k={args.k} "
+        f"(~{est_calls}+ Sonnet API calls; agent tool loops add more). "
+        f"Use --k 1 to minimize cost."
+    )
+    results = defaultdict(lambda: {"pass_hat_k": 0, "mean_sum": 0.0, "total": 0})
     failures = []
-    divergences = []
 
     for case in cases:
-        final_reply, trace = run_conversation(case, client, orders)
+        r = eval_case_k(case, client, orders, k=args.k, verbose=args.verbose)
 
-        action_ok, action_reason = check_actions(case, trace)
-        content_ok, content_reason = check_reply_content(case, final_reply, orders)
-        judge_result = judge(case, final_reply, client)
-        judge_ok = judge_result["grade"] == "PASS"
-        guardrails_ok = action_ok and content_ok
-        passed = guardrails_ok and judge_ok
+        suite = results[case["suite"]]
+        suite["total"] += 1
+        suite["pass_hat_k"] += int(r["pass^k"])
+        suite["mean_sum"] += r["mean"]
 
-        results[case["suite"]]["total"] += 1
-        results[case["suite"]]["pass"] += int(passed)
-        a = "PASS" if action_ok else "FAIL"
-        c = "PASS" if content_ok else "FAIL"
-        j = "PASS" if judge_ok else "FAIL"
-        print(f"[ACTION {a} | CONTENT {c} | JUDGE {j}] {case['id']:30s} ({case['suite']})")
-        if args.verbose or not passed:
-            print(f"        reply:  {final_reply[:140]}")
-            print(f"        judge:  {judge_result['reason']}")
-            if not action_ok:
-                print(f"        actions: {action_reason}")
-            if not content_ok:
-                print(f"        content: {content_reason}")
+        if r["pass^k"]:
+            flag = "PASS "
+        elif r["mean"] > 0:
+            flag = "FLAKY"
+        else:
+            flag = "FAIL "
+        print(
+            f"[{flag}] {case['id']:30s} "
+            f"mean={r['mean']:.2f}  pass^{args.k}={int(r['pass^k'])}  "
+            f"runs={['P' if x else 'F' for x in r['runs']]}  ({case['suite']})"
+        )
 
-        if not passed:
+        if not r["pass^k"]:
             failures.append(case["id"])
-        if judge_ok and not guardrails_ok:
-            divergences.append(case["id"])
 
     print("\n" + "=" * 50)
     print("SUITE RESULTS")
     print("=" * 50)
     for suite in sorted(results):
-        r = results[suite]
-        pct = 100 * r["pass"] // r["total"] if r["total"] else 0
-        print(f"  {suite:20s} {r['pass']}/{r['total']}  ({pct}%)")
+        s = results[suite]
+        pk_pct = 100 * s["pass_hat_k"] // s["total"] if s["total"] else 0
+        avg_mean = s["mean_sum"] / s["total"] if s["total"] else 0
+        print(
+            f"  {suite:20s} pass^{args.k}: {s['pass_hat_k']}/{s['total']} ({pk_pct}%)   "
+            f"avg mean: {avg_mean:.2f}"
+        )
 
     if failures:
-        print(f"\nFailures: {', '.join(failures)}")
-    if divergences:
-        print(f"Judge/action divergences: {', '.join(divergences)}")
+        print(f"\nNot pass^{args.k} (flaky or failing): {', '.join(failures)}")
 
 
 if __name__ == "__main__":

@@ -4,9 +4,9 @@ skills/ — composable agent capabilities.
 Each skill is a small module exposing a NAME, a DESCRIPTION, and a
 PROMPT fragment. The agent is a composable tool-calling loop from a set of skills, rather than doing one massive prompt with instructions. By adding skills we are not adding long prompt but a reusable capability. """
 
-from . import eligibility, exchange, escalation
+from . import eligibility, exchange, escalation, return_flow
 
-REGISTRY = [eligibility, exchange, escalation]
+REGISTRY = [eligibility, return_flow, exchange, escalation]
 
 
 def assemble_skill_prompt():
