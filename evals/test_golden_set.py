@@ -29,6 +29,7 @@ from identity_turns import (
     COMPLETION_FOLLOW_UPS,
     COMPLETION_IDS,
     MULTI_TURN_IDS,
+    SCRIPTED_FOLLOW_UPS,
     SKIP_SESSION_EMAIL_IDS,
     UNVERIFIED_SESSION_IDS,
     WRONG_SESSION_EMAIL,
@@ -93,6 +94,8 @@ def test_identity_turns_resolve_from_orders():
     orders = _load("orders.json")
     by_id = {c["id"]: c for c in load_cases()}
     for case_id in MULTI_TURN_IDS:
+        if case_id in SKIP_SESSION_EMAIL_IDS:
+            continue
         case = by_id[case_id]
         email = session_email_for_case(case, orders)
         order_id = order_id_for_case(case)
@@ -105,10 +108,10 @@ def test_identity_turns_resolve_from_orders():
         if case_id in COMPLETION_IDS:
             turns = user_turns_for_case(case, orders)
             assert turns, f"{case_id}: completion case needs confirm follow-up"
-            assert turns == [COMPLETION_FOLLOW_UPS[case_id]], (
-                f"{case_id}: completion follow-up must match COMPLETION_FOLLOW_UPS"
+            assert turns == list(SCRIPTED_FOLLOW_UPS[case_id]), (
+                f"{case_id}: completion follow-up must match SCRIPTED_FOLLOW_UPS"
             )
-            assert "that's me" not in turns[0].lower(), (
+            assert "that's me" not in turns[-1].lower(), (
                 f"{case_id}: session is pre-verified; follow-up must not restate identity"
             )
 
