@@ -17,10 +17,15 @@ session id. This is a local single-user demo; it is intentionally simple and
 not hardened against concurrency.
 """
 
+import json
 import logging
 import os
 import secrets
+import time
 import uuid
+from collections import defaultdict
+from functools import lru_cache
+from pathlib import Path
 
 import anthropic
 from dotenv import load_dotenv
@@ -35,6 +40,16 @@ logger = logging.getLogger(__name__)
 
 # Reject oversized payloads early to limit cost/DoS exposure.
 MAX_MESSAGE_CHARS = 4000
+MAX_CONVERSATIONS = int(os.environ.get("MAX_CONVERSATIONS", "100"))
+SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", "3600"))
+
+# Optional API key for state-changing endpoints. When unset, auth is skipped.
+CHAT_API_KEY = os.environ.get("CHAT_API_KEY")
+
+# Per-IP rate limit for /chat (in-memory; resets on process restart).
+_RATE_LIMIT_WINDOW_SEC = 60
+_RATE_LIMIT_MAX_REQUESTS = 10
+_rate_limit_hits: dict[str, list[float]] = defaultdict(list)
 
 app = Flask(__name__)
 
@@ -53,9 +68,85 @@ app.config.update(
     MAX_CONTENT_LENGTH=64 * 1024,
 )
 
-# Module-level in-memory store: session id -> conversation list.
-# Each conversation is a list of {"role": "user"|"assistant", "content": <str>}.
-_conversations = {}
+class ConversationStore:
+    """Bounded in-memory store: session id -> conversation list with TTL/LRU."""
+
+    def __init__(self, max_conversations: int, ttl_seconds: int) -> None:
+        self._max = max_conversations
+        self._ttl = ttl_seconds
+        self._sessions: dict[str, dict] = {}
+
+    def get(self, sid: str) -> list:
+        """Return the conversation for sid, creating an empty list if needed."""
+        self.evict_expired()
+        entry = self._sessions.get(sid)
+        if entry is None:
+            self.evict_lru()
+            entry = {"messages": [], "last_accessed": time.time()}
+            self._sessions[sid] = entry
+        else:
+            entry["last_accessed"] = time.time()
+        return entry["messages"]
+
+    def set(self, sid: str, conversation: list) -> None:
+        """Replace the conversation list for sid."""
+        self.evict_expired()
+        self._sessions[sid] = {
+            "messages": conversation,
+            "last_accessed": time.time(),
+        }
+        while len(self._sessions) > self._max:
+            self.evict_lru()
+
+    def reset(self, sid: str) -> None:
+        """Clear the conversation for sid."""
+        entry = self._sessions.get(sid)
+        if entry is not None:
+            entry["messages"] = []
+            entry["last_accessed"] = time.time()
+
+    def evict_expired(self) -> None:
+        """Remove sessions that have exceeded the TTL since last access."""
+        cutoff = time.time() - self._ttl
+        for sid in [
+            sid
+            for sid, entry in self._sessions.items()
+            if entry["last_accessed"] < cutoff
+        ]:
+            del self._sessions[sid]
+
+    def evict_lru(self) -> None:
+        """Evict the least-recently accessed session when at capacity."""
+        if len(self._sessions) < self._max:
+            return
+        oldest_sid = min(
+            self._sessions,
+            key=lambda sid: self._sessions[sid]["last_accessed"],
+        )
+        del self._sessions[oldest_sid]
+
+
+_store = ConversationStore(MAX_CONVERSATIONS, SESSION_TTL_SECONDS)
+
+_DATA = Path(__file__).parent / "data"
+
+
+@lru_cache(maxsize=1)
+def _load_orders():
+    with open(_DATA / "orders.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _verify_order_email(order_id: str, email: str) -> str | None:
+    """Return the order's canonical email when it matches (case-insensitive)."""
+    orders = _load_orders()
+    oid = order_id.strip().upper()
+    order = orders.get(oid)
+    if not order:
+        return None
+    if email.strip().lower() != order["customer_email"].strip().lower():
+        return None
+    return order["customer_email"]
 
 # Lazily-created Anthropic client. We do NOT create it at import time so this
 # module imports cleanly even when no ANTHROPIC_API_KEY is set.
@@ -76,7 +167,50 @@ def _get_conversation():
     if not sid:
         sid = uuid.uuid4().hex
         session["sid"] = sid
-    return _conversations.setdefault(sid, [])
+    return _store.get(sid)
+
+
+def _client_ip() -> str:
+    return request.remote_addr or "unknown"
+
+
+def _unauthorized_response():
+    return jsonify({"error": "Unauthorized."}), 401
+
+
+def _require_api_key():
+    """Return an error response when CHAT_API_KEY is set but the header is wrong."""
+    if not CHAT_API_KEY:
+        return None
+    provided = request.headers.get("X-API-Key", "")
+    if not secrets.compare_digest(provided, CHAT_API_KEY):
+        return _unauthorized_response()
+    return None
+
+
+def _rate_limit_exceeded() -> bool:
+    """Return True when this client IP has exceeded the /chat rate limit."""
+    ip = _client_ip()
+    now = time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW_SEC
+    hits = _rate_limit_hits[ip]
+    hits[:] = [t for t in hits if t > window_start]
+    if len(hits) >= _RATE_LIMIT_MAX_REQUESTS:
+        return True
+    hits.append(now)
+    return False
+
+
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.after_request
+def _cache_control(response):
+    if request.endpoint in ("index", "chat"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 PAGE = """<!doctype html>
@@ -219,7 +353,7 @@ PAGE = """<!doctype html>
     <header>
       <div>
         <h1>Returns &amp; Exchange Assistant</h1>
-        <div class="sub">Singapore Apparel &middot; supervised agent demo</div>
+        <div class="sub">Singapore Apparel &middot; verify with order ID + email</div>
       </div>
       <button id="newchat" type="button">New chat</button>
     </header>
@@ -297,6 +431,18 @@ PAGE = """<!doctype html>
     setBusy(true);
     showTyping();
     try {
+      const orderMatch = text.match(/\b(NW-\d+)\b/i);
+      const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.\w+/);
+      if (orderMatch && emailMatch) {
+        await fetch("/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order_id: orderMatch[1],
+            email: emailMatch[0]
+          })
+        });
+      }
       const res = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -346,11 +492,37 @@ PAGE = """<!doctype html>
 
 @app.route("/")
 def index():
-    return render_template_string(PAGE)
+    return _no_store(render_template_string(PAGE))
+
+
+@app.route("/verify", methods=["POST"])
+def verify():
+    """Verify order ownership and bind identity to the server session."""
+    auth_error = _require_api_key()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    order_id = (data.get("order_id") or "").strip()
+    email = (data.get("email") or "").strip()
+    if not order_id or not email:
+        return jsonify({"verified": False, "error": "order_id and email required."}), 400
+
+    canonical = _verify_order_email(order_id, email)
+    if canonical:
+        session["customer_email"] = canonical
+        return jsonify({"verified": True})
+    return jsonify({"verified": False})
 
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    auth_error = _require_api_key()
+    if auth_error:
+        return auth_error
+    if _rate_limit_exceeded():
+        return jsonify({"error": "Rate limit exceeded. Try again later."}), 429
+
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     if not message:
@@ -370,9 +542,17 @@ def chat():
             conversation,
             client=client,
             session_customer_email=session.get("customer_email"),
+            allow_chat_email_fallback=False,
         )
         # 3. supervisor audits the draft before it reaches the customer
-        reply, verdict = supervised_reply(conversation, draft, trace, client=client)
+        reply, verdict = supervised_reply(
+            conversation,
+            draft,
+            trace,
+            client=client,
+            session_customer_email=session.get("customer_email"),
+            allow_chat_email_fallback=False,
+        )
         # 4. store the SUPERVISED reply (what the customer actually sees)
         conversation.append({"role": "assistant", "content": reply})
         # 5. return the supervised reply and verdict to the browser
@@ -402,9 +582,14 @@ def chat():
 
 @app.route("/reset", methods=["POST"])
 def reset():
+    auth_error = _require_api_key()
+    if auth_error:
+        return auth_error
+
     sid = session.get("sid")
     if sid:
-        _conversations[sid] = []
+        _store.reset(sid)
+    session.pop("customer_email", None)
     return jsonify({"ok": True})
 
 
@@ -413,4 +598,5 @@ if __name__ == "__main__":
     # execution if reachable) and must never be on by default. Opt in explicitly
     # via FLASK_DEBUG=1 for local development only.
     debug = os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
-    app.run(debug=debug, port=int(os.environ.get("PORT", "5000")))
+    host = os.environ.get("HOST", "127.0.0.1")
+    app.run(debug=debug, host=host, port=int(os.environ.get("PORT", "5000")))

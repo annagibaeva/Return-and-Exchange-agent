@@ -167,7 +167,8 @@ def run_conversation(case, client, orders, verbose=False, usage_tracker=None):
     )
     trace.extend(turn_trace)
     final_reply, _verdict = supervised_reply(
-        messages, draft, trace, client=client, usage_tracker=usage_tracker
+        messages, draft, trace, client=client, usage_tracker=usage_tracker,
+        session_customer_email=session_email,
     )
 
     for turn in user_turns_for_case(case, orders)[:MAX_USER_TURNS]:
@@ -185,7 +186,8 @@ def run_conversation(case, client, orders, verbose=False, usage_tracker=None):
         )
         trace.extend(turn_trace)
         final_reply, _verdict = supervised_reply(
-            messages, draft, trace, client=client, usage_tracker=usage_tracker
+            messages, draft, trace, client=client, usage_tracker=usage_tracker,
+            session_customer_email=session_email,
         )
 
     return final_reply, trace, messages

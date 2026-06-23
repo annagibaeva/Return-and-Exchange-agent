@@ -147,10 +147,17 @@ def test_supervisor_fast_pass_for_label_in_trace():
 
     trace = [
         {
+            "tool": "check_return_eligibility",
+            "input": {"order_id": "NW-10088", "sku": "SOCK-WOOL-L"},
+            "result": {"eligible": True},
+        },
+        {
             "tool": "create_return_label",
             "input": {"order_id": "NW-10088", "sku": "SOCK-WOOL-L", "resolution": "refund"},
             "result": {
                 "label_created": True,
+                "order_id": "NW-10088",
+                "sku": "SOCK-WOOL-L",
                 "rma": "RMA-10088-L-L",
                 "carrier": "ShipFast",
             },
@@ -188,6 +195,42 @@ def test_tools_redact_without_verified_session():
     assert label["reason"] == "identity_not_verified"
 
 
+def test_create_return_label_enforces_eligibility():
+    from tools import create_return_label
+
+    orders = _load("orders.json")
+
+    final_sale_id = "NW-10067"
+    final_sale_email = orders[final_sale_id]["customer_email"]
+    blocked_final_sale = create_return_label(
+        final_sale_id,
+        "TEE-MERINO-S",
+        "refund",
+        session_customer_email=final_sale_email,
+    )
+    assert blocked_final_sale == {"label_created": False, "reason": "final_sale"}
+
+    outside_window_id = "NW-10044"
+    outside_window_email = orders[outside_window_id]["customer_email"]
+    blocked_window = create_return_label(
+        outside_window_id,
+        "JKT-RAIN-M",
+        "refund",
+        session_customer_email=outside_window_email,
+    )
+    assert blocked_window == {"label_created": False, "reason": "outside_window"}
+
+    eligible_id = "NW-10088"
+    eligible_email = orders[eligible_id]["customer_email"]
+    allowed = create_return_label(
+        eligible_id,
+        "SOCK-WOOL-L",
+        "refund",
+        session_customer_email=eligible_email,
+    )
+    assert allowed["label_created"] is True
+
+
 if __name__ == "__main__":
     n = len(load_cases())
     print(f"[ok] {GOLDEN.name} parses ({n} cases)")
@@ -203,3 +246,5 @@ if __name__ == "__main__":
     print("[ok] supervisor fast-pass for label in trace")
     test_tools_redact_without_verified_session()
     print("[ok] tools redact order PII without verified session")
+    test_create_return_label_enforces_eligibility()
+    print("[ok] create_return_label enforces eligibility when identity verified")

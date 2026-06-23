@@ -13,6 +13,7 @@ or ESCALATE (hand to a human).
 
 import json
 import os
+import re
 from pathlib import Path
 
 import anthropic
@@ -56,6 +57,119 @@ label resolution is 'refund'.
 
 Respond ONLY with a JSON object, no prose, no markdown:
 {{"verdict": "PASS" | "REVISE" | "ESCALATE", "reason": "<short reason, empty if PASS>"}}"""
+
+
+_EMAIL_PATTERN = re.compile(r"\S+@\S+\.\S+")
+
+
+def _normalize_id(value):
+    return str(value or "").strip().upper()
+
+
+def _trace_has_unverified_lookup(trace):
+    """True if any lookup_order step returned identity_verified=False."""
+    for step in trace:
+        if step.get("tool") != "lookup_order":
+            continue
+        result = step.get("result") or {}
+        if result.get("identity_verified") is False:
+            return True
+    return False
+
+
+def _draft_suggests_pii_leak(draft_reply):
+    """Heuristic patterns that may indicate order PII leaked on identity mismatch."""
+    if _EMAIL_PATTERN.search(draft_reply):
+        return True
+    draft = draft_reply.lower()
+    return any(
+        token in draft
+        for token in (
+            "customer_email",
+            "customer email",
+            "delivered on",
+            "delivered_date",
+        )
+    )
+
+
+def _fast_path_blocked_by_identity(trace, draft_reply):
+    """Fail closed: never fast-path when identity is unverified or draft may leak PII."""
+    if _trace_has_unverified_lookup(trace):
+        return True
+    if _draft_suggests_pii_leak(draft_reply):
+        for step in trace:
+            if step.get("tool") != "lookup_order":
+                continue
+            result = step.get("result") or {}
+            if result.get("found") and result.get("identity_verified") is False:
+                return True
+    return False
+
+
+def _trace_has_eligible_check(trace, order_id, sku):
+    """True if trace includes eligible check_return_eligibility for order_id/sku."""
+    oid = _normalize_id(order_id)
+    sku_n = _normalize_id(sku)
+    for step in trace:
+        if step.get("tool") != "check_return_eligibility":
+            continue
+        inp = step.get("input") or {}
+        if _normalize_id(inp.get("order_id")) != oid:
+            continue
+        if _normalize_id(inp.get("sku")) != sku_n:
+            continue
+        if (step.get("result") or {}).get("eligible") is True:
+            return True
+    return False
+
+
+def _eligible_check_before_label(trace, order_id, sku):
+    """Eligible check_return_eligibility for order_id/sku must precede create_return_label."""
+    oid = _normalize_id(order_id)
+    sku_n = _normalize_id(sku)
+    eligible_idx = None
+    for i, step in enumerate(trace):
+        tool = step.get("tool")
+        inp = step.get("input") or {}
+        if tool == "check_return_eligibility":
+            if _normalize_id(inp.get("order_id")) != oid:
+                continue
+            if _normalize_id(inp.get("sku")) != sku_n:
+                continue
+            if (step.get("result") or {}).get("eligible") is True:
+                eligible_idx = i
+        elif tool == "create_return_label":
+            if _normalize_id(inp.get("order_id")) != oid:
+                continue
+            if _normalize_id(inp.get("sku")) != sku_n:
+                continue
+            if not (step.get("result") or {}).get("label_created"):
+                continue
+            if eligible_idx is None or eligible_idx >= i:
+                return False
+            return True
+    return False
+
+
+def _trace_has_oos_sequence(trace):
+    """Eligible check_return_eligibility must precede check_inventory with in_stock=false."""
+    for i, step in enumerate(trace):
+        if step.get("tool") != "check_return_eligibility":
+            continue
+        if not (step.get("result") or {}).get("eligible"):
+            continue
+        sku = _normalize_id((step.get("input") or {}).get("sku"))
+        for j in range(i + 1, len(trace)):
+            inv = trace[j]
+            if inv.get("tool") != "check_inventory":
+                continue
+            inv_inp = inv.get("input") or {}
+            if _normalize_id(inv_inp.get("sku")) != sku:
+                continue
+            if not (inv.get("result") or {}).get("in_stock"):
+                return True
+    return False
 
 
 def _label_created(trace):
@@ -112,11 +226,19 @@ def _inventory_oos_handled(trace, draft_reply):
 
 def deterministic_verdict(customer_messages, draft_reply, trace):
     """Fast-path PASS for tool-backed replies the LLM supervisor often over-blocks."""
+    if _fast_path_blocked_by_identity(trace, draft_reply):
+        return None
+
     label = _label_created(trace)
     if label and _draft_reflects_label(draft_reply, label):
-        return {"verdict": "PASS", "reason": "label confirmed in trace and draft"}
+        order_id = label.get("order_id", "")
+        sku = label.get("sku", "")
+        if _trace_has_eligible_check(trace, order_id, sku) and _eligible_check_before_label(
+            trace, order_id, sku
+        ):
+            return {"verdict": "PASS", "reason": "label confirmed in trace and draft"}
 
-    if _inventory_oos_handled(trace, draft_reply):
+    if _inventory_oos_handled(trace, draft_reply) and _trace_has_oos_sequence(trace):
         return {"verdict": "PASS", "reason": "out-of-stock handled with alternatives"}
 
     return None
@@ -173,7 +295,50 @@ Audit this draft. Respond with the JSON verdict only."""
         return {"verdict": "ESCALATE", "reason": "supervisor returned non-JSON"}
 
 
-def supervised_reply(customer_messages, draft_reply, trace, client=None, usage_tracker=None):
+_ESCALATE_FALLBACK = (
+    "Thanks for your patience — I'm connecting you with a member of "
+    "our team who can help with this directly."
+)
+_REVISE_FALLBACK = (
+    "I want to make sure I get this right for you — let me bring in a "
+    "colleague to confirm the details before we proceed."
+)
+
+
+def revise_with_agent(
+    customer_messages,
+    draft_reply,
+    trace,
+    reason,
+    client=None,
+    usage_tracker=None,
+    session_customer_email=None,
+    allow_chat_email_fallback=True,
+):
+    """One revision attempt: agent re-drafts using supervisor feedback."""
+    from agent import regenerate_after_revision
+
+    revised_draft, revision_trace = regenerate_after_revision(
+        customer_messages,
+        draft_reply,
+        reason,
+        client=client,
+        session_customer_email=session_customer_email,
+        allow_chat_email_fallback=allow_chat_email_fallback,
+        usage_tracker=usage_tracker,
+    )
+    return revised_draft, trace + revision_trace
+
+
+def supervised_reply(
+    customer_messages,
+    draft_reply,
+    trace,
+    client=None,
+    usage_tracker=None,
+    session_customer_email=None,
+    allow_chat_email_fallback=True,
+):
     """
     Convenience wrapper: returns the message that should actually be sent,
     applying the supervisor's verdict.
@@ -182,9 +347,28 @@ def supervised_reply(customer_messages, draft_reply, trace, client=None, usage_t
     if v["verdict"] == "PASS":
         return draft_reply, v
     if v["verdict"] == "ESCALATE":
-        return ("Thanks for your patience — I'm connecting you with a member of "
-                "our team who can help with this directly."), v
-    # REVISE: in this scaffold we surface a safe fallback; a fuller build would
-    # loop back to the agent with the supervisor's reason for a second attempt.
-    return ("I want to make sure I get this right for you — let me bring in a "
-            "colleague to confirm the details before we proceed."), v
+        return _ESCALATE_FALLBACK, v
+    if v["verdict"] == "REVISE":
+        revised_draft, combined_trace = revise_with_agent(
+            customer_messages,
+            draft_reply,
+            trace,
+            v["reason"],
+            client=client,
+            usage_tracker=usage_tracker,
+            session_customer_email=session_customer_email,
+            allow_chat_email_fallback=allow_chat_email_fallback,
+        )
+        v2 = review(
+            customer_messages,
+            revised_draft,
+            combined_trace,
+            client,
+            usage_tracker=usage_tracker,
+        )
+        if v2["verdict"] == "PASS":
+            return revised_draft, v2
+        if v2["verdict"] == "ESCALATE":
+            return _ESCALATE_FALLBACK, v2
+        return _REVISE_FALLBACK, v2
+    return _REVISE_FALLBACK, v

@@ -20,6 +20,8 @@ from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 
+import yaml
+
 DATA = Path(__file__).parent / "data"
 
 
@@ -51,6 +53,13 @@ def _load(name):
     """
     with open(DATA / name, encoding="utf-8") as f:
         return json.load(f)
+
+
+@lru_cache(maxsize=1)
+def _load_policy() -> dict:
+    """Load and cache return policy from policy.yaml."""
+    with open(Path(__file__).parent / "policy.yaml", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 def lookup_order(order_id: str, session_customer_email: str | None = None) -> dict:
@@ -152,6 +161,16 @@ def create_return_label(
         return {"label_created": False, "reason": "order_not_found"}
     if not order.get("identity_verified"):
         return {"label_created": False, "reason": "identity_not_verified"}
+
+    eligibility = check_return_eligibility(
+        order_id,
+        sku,
+        _load_policy(),
+        session_customer_email=session_customer_email,
+    )
+    if not eligibility.get("eligible"):
+        return {"label_created": False, "reason": eligibility["reason"]}
+
     return {
         "label_created": True,
         "order_id": order_id,

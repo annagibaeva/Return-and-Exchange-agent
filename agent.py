@@ -63,10 +63,16 @@ _EMAIL_FROM_MESSAGE = re.compile(
 )
 
 
-def _session_customer_email(messages, session_customer_email=None):
-    """Auth-layer email, or the latest address the customer volunteered in chat."""
+def _session_customer_email(
+    messages,
+    session_customer_email=None,
+    allow_chat_email_fallback=True,
+):
+    """Auth-layer email, or optionally the latest address volunteered in chat."""
     if session_customer_email:
         return session_customer_email.strip()
+    if not allow_chat_email_fallback:
+        return None
     for message in reversed(messages):
         if message.get("role") != "user":
             continue
@@ -81,6 +87,21 @@ def _session_customer_email(messages, session_customer_email=None):
 
 def _run_tool(name, args, session_customer_email=None):
     """Dispatch a tool call, injecting policy and session identity where needed."""
+    if name not in toolbox.TOOL_FUNCTIONS:
+        return {"error": "unknown_tool", "tool": name}
+
+    if not isinstance(args, dict):
+        args = {}
+
+    for schema in toolbox.TOOL_SCHEMAS:
+        if schema["name"] != name:
+            continue
+        required = schema.get("input_schema", {}).get("required", [])
+        missing = [field for field in required if field not in args]
+        if missing:
+            return {"error": "invalid_input", "tool": name, "missing": missing}
+        break
+
     fn = toolbox.TOOL_FUNCTIONS[name]
     if name == "check_return_eligibility":
         return fn(
@@ -94,18 +115,29 @@ def _run_tool(name, args, session_customer_email=None):
     return fn(**args)
 
 
-def run_agent(messages, client=None, verbose=False, session_customer_email=None, usage_tracker=None):
+def run_agent(
+    messages,
+    client=None,
+    verbose=False,
+    session_customer_email=None,
+    allow_chat_email_fallback=True,
+    usage_tracker=None,
+):
     """
     Run the agent loop over a list of {role, content} messages.
     Returns (final_text, trace) where trace is the list of tool calls made.
 
     session_customer_email: verified address from the auth layer (login/session).
-    When omitted, the agent uses any email the customer volunteered in the thread.
+    When omitted and allow_chat_email_fallback is True (default), the agent uses
+    any email the customer volunteered in the thread (eval/REPL). When False
+    (web app), only the session value is used — chat text is not trusted.
     """
     client = client or anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     convo = list(messages)
     trace = []
-    verified_email = _session_customer_email(convo, session_customer_email)
+    verified_email = _session_customer_email(
+        convo, session_customer_email, allow_chat_email_fallback
+    )
 
     for _ in range(MAX_TURNS):
         resp = client.messages.create(
@@ -142,6 +174,42 @@ def run_agent(messages, client=None, verbose=False, session_customer_email=None,
         return final_text, trace
 
     return "I'm having trouble completing this — let me hand you to a human agent.", trace
+
+
+def regenerate_after_revision(
+    messages,
+    draft,
+    supervisor_reason,
+    client=None,
+    session_customer_email=None,
+    allow_chat_email_fallback=True,
+    usage_tracker=None,
+):
+    """
+    Re-run the agent once after a supervisor REVISE verdict (max one revision).
+
+    Appends the rejected draft plus a revision nudge, then delegates to run_agent.
+    Returns (revised_text, trace) for any new tool calls made during revision.
+    """
+    revision_messages = list(messages)
+    revision_messages.append({"role": "assistant", "content": draft})
+    revision_messages.append({
+        "role": "user",
+        "content": (
+            "[Supervisor review — revise before sending to customer]\n"
+            "Your previous draft was not approved. Fix the issue and provide a "
+            "corrected customer-facing reply only. Do not repeat the policy "
+            "violation. Call tools only if you must verify facts.\n\n"
+            f"Supervisor reason: {supervisor_reason}"
+        ),
+    })
+    return run_agent(
+        revision_messages,
+        client=client,
+        session_customer_email=session_customer_email,
+        allow_chat_email_fallback=allow_chat_email_fallback,
+        usage_tracker=usage_tracker,
+    )
 
 
 if __name__ == "__main__":
