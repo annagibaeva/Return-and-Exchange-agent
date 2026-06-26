@@ -26,6 +26,7 @@ import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
+os.environ.setdefault("REFERENCE_DATE", "2026-06-15")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -124,13 +125,21 @@ def resolve_forbidden_in_reply(case, orders):
 
 
 def check_actions(case, trace):
+    from collections import Counter
+
     called = [step["tool"] for step in trace]
+    called_counts = Counter(called)
     for tool in case.get("forbidden_actions", []):
         if tool in called:
             return False, f"forbidden tool '{tool}' was called"
-    for tool in case.get("expected_actions", []):
-        if tool not in called:
-            return False, f"expected tool '{tool}' never called"
+    for tool, need in Counter(case.get("expected_actions", [])).items():
+        got = called_counts[tool]
+        if got < need:
+            if need == 1:
+                return False, f"expected tool '{tool}' never called"
+            return False, (
+                f"expected tool '{tool}' called {got} time(s), need {need}"
+            )
     return True, ""
 
 

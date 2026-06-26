@@ -143,7 +143,11 @@ def run_agent(
         resp = client.messages.create(
             model=MODEL,
             max_tokens=1024,
-            system=_system_prompt(),
+            system=[{
+                "type": "text",
+                "text": _system_prompt(),
+                "cache_control": {"type": "ephemeral"},
+            }],
             tools=toolbox.TOOL_SCHEMAS,
             messages=convo,
         )

@@ -16,6 +16,7 @@ redacted — the guarantee is structural, not prompt-only.
 """
 
 import json
+import os
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -62,6 +63,14 @@ def _load_policy() -> dict:
         return yaml.safe_load(f)
 
 
+def _reference_date() -> date:
+    """Policy clock date: REFERENCE_DATE env (YYYY-MM-DD) or today."""
+    raw = os.environ.get("REFERENCE_DATE")
+    if raw:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    return date.today()
+
+
 def lookup_order(order_id: str, session_customer_email: str | None = None) -> dict:
     """Fetch an order by ID.
 
@@ -102,7 +111,7 @@ def check_return_eligibility(
     region = order.get("region", "default")
     window = policy["return_window_days"].get(region, policy["return_window_days"]["default"])
     delivered = datetime.strptime(order["delivered_date"], "%Y-%m-%d").date()
-    days_since = (date.today() - delivered).days
+    days_since = (_reference_date() - delivered).days
 
     if item.get("final_sale") and not policy.get("final_sale_returnable", False):
         return {

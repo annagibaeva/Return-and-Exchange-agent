@@ -5,6 +5,10 @@
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+
+# Editor / IDE
+.vscode/
 
 # Office temp lock files
 ~$*.docx

@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
 import uuid
 from collections import defaultdict
@@ -204,6 +205,22 @@ def _rate_limit_exceeded() -> bool:
 def _no_store(response):
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _validate_startup_config() -> None:
+    host = os.environ.get("HOST", "127.0.0.1")
+    if host != "0.0.0.0":
+        return
+    missing = []
+    if not CHAT_API_KEY:
+        missing.append("CHAT_API_KEY")
+    if not os.environ.get("FLASK_SECRET_KEY"):
+        missing.append("FLASK_SECRET_KEY")
+    if missing:
+        sys.exit(
+            "Error: HOST is 0.0.0.0 but required environment variables are missing: "
+            + ", ".join(missing)
+        )
 
 
 @app.after_request
@@ -434,7 +451,7 @@ PAGE = """<!doctype html>
       const orderMatch = text.match(/\b(NW-\d+)\b/i);
       const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.\w+/);
       if (orderMatch && emailMatch) {
-        await fetch("/verify", {
+        const verifyRes = await fetch("/verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -442,6 +459,13 @@ PAGE = """<!doctype html>
             email: emailMatch[0]
           })
         });
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok || !verifyData.verified) {
+          hideTyping();
+          addError(verifyData.error || "Could not verify order ID and email. Please check and try again.");
+          setBusy(false);
+          return;
+        }
       }
       const res = await fetch("/chat", {
         method: "POST",
@@ -488,6 +512,11 @@ PAGE = """<!doctype html>
 </body>
 </html>
 """
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"ok": True})
 
 
 @app.route("/")
@@ -594,6 +623,7 @@ def reset():
 
 
 if __name__ == "__main__":
+    _validate_startup_config()
     # debug=True exposes the interactive Werkzeug debugger (arbitrary code
     # execution if reachable) and must never be on by default. Opt in explicitly
     # via FLASK_DEBUG=1 for local development only.
