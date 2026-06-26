@@ -6,6 +6,20 @@ The goal is to simulate a real-world scenario: an agent that can be productionis
 
 ---
 
+## Documentation
+
+Extended docs live in [`docs/`](docs/):
+
+| Document | Description |
+|----------|-------------|
+| [architecture.md](docs/architecture.md) | System design — components, request flow, tools, supervisor, eval harness, cost tracking |
+| [demo-script.md](docs/demo-script.md) | Presenter-ready live demo script with order IDs, talking points, and timing guides |
+| [case-study.md](docs/case-study.md) | Build-and-harden narrative — eval journey, bugs found, pass^5, lessons learned |
+| [outputs.md](docs/outputs.md) | Portfolio summary — project outputs, proof bundle, recruiter hook, success criteria |
+| [demo-script-3min.md](docs/demo-script-3min.md) | ~3 min Loom/video script — happy path, identity refusal, harness, τ²-bench |
+
+---
+
 ## What success looks like
 
 - **End-to-end flow** — lookup → eligibility → inventory (if exchange) → label, without human hand-holding on the happy path
@@ -163,72 +177,6 @@ safety         pass^5: 3/3 (100%)   mean 1.00
 
 ---
 
-## τ-bench retail — external benchmark
-
-The golden-set harness scores **pass^5: 100%** on 10 cases the agent was built around. [τ-bench](https://github.com/sierra-research/tau2-bench) retail is a harder, external test: **114 tasks**, LLM-simulated customer, database-state scoring against the retail domain's real tools and policy — not Singapore Apparel mocks.
-
-### Result
-
-| Metric | Score |
-|---|---|
-| **This agent** | **52% pass^1** (1 trial) |
-| GPT-4.1 baseline | ~74% |
-| Claude 3.7 Sonnet baseline | ~79% |
-
-The agent scored **~20–27 points below** generic baselines on the same split. That is the real number. The gap from this repo's **100% pass^5** is the lesson: the golden set tested cases I imagined; τ-bench tested the ones I didn't.
-
-<sup>1</sup> *pass^1 only — not comparable to baselines reported at pass^4.*
-
-### Why it scored low — three structural mismatches
-
-**1. Tool misalignment (biggest lever).** Skills steer the model toward Singapore Apparel's API (`lookup_order`, `create_return_label`) — tools that do not exist in τ-bench retail, which uses `find_user_id_by_email`, `return_delivered_order_items`, etc. The adapter injects τ-bench's policy and can swap in τ-bench-specific skill blocks, but with legacy skills the agent partly fights its own instructions.
-
-**2. Supervisor tuned for the wrong domain.** The supervisor fast-paths on `create_return_label` / `check_inventory` — never present in τ-bench — so it always falls through to auditing against Singapore Apparel policy that does not match the retail DB. Noise, not help.
-
-**3. τ-bench scoring is strict and multiplicative.** A task passes only if final DB state, action sequence, and exact-number assertions (refund amounts, counts) all align. The dominant failure mode (**53/55** failing tasks) is wrong final DB state — plausible conversation, wrong write. Same "talks but doesn't act" failure the golden-set harness was built to catch, now at scale.
-
-### Hypothesis (falsifiable)
-
-Most of the gap is **integration, not reasoning**. Aligning skills to τ-bench's real tools and enforcing a write-after-confirmation rule should move **52% → ~65–70%**; closing cancel/modify coverage and exact-number replies should approach the **~74%** baseline. If those fixes do not move the score, the problem is deeper than alignment — which is itself worth knowing.
-
-### Next on τ-bench
-
-- Align skills to τ-bench retail tool names (drop Singapore Apparel workflow references)
-- A/B the supervisor (`--no-supervisor` on benchmark runs — test whether it helps or hurts)
-- Enforce write-after-yes; fix number assertions in replies
-- Expand the golden set to cover cancel/modify/address tasks it currently ignores
-
-### Limitations of this run
-
-- **1 trial** — pass^1 only; baselines use pass^4
-- **Cost not instrumented** — ~50h wall time, ~27 min/task
-- **Adapter, not native tools** — τ-bench runs via `examples/agents/return_exchange_agent_tau2.py` in the τ-bench repo; this tests skills/supervisor bridged in, not the original `tools.py` layer
-
-### Running τ-bench retail
-
-From the **τ-bench** repo root (this workspace), with API keys in `.env` (`ANTHROPIC_API_KEY` for the agent, `OPENAI_API_KEY` for the user simulator):
-
-```powershell
-# Smoke test (3 tasks)
-uv run python examples/agents/return_exchange_agent_tau2.py `
-    --return-agent-path "C:/Agentic/tau2-bench-sierra-main/.review/Return-and-Exchange-agent" `
-    --task-ids 0 1 2 `
-    --user-llm openai/gpt-4.1-mini
-
-# Full retail base split (114 tasks)
-uv run python examples/agents/return_exchange_agent_tau2.py `
-    --return-agent-path "C:/Agentic/tau2-bench-sierra-main/.review/Return-and-Exchange-agent"
-
-# A/B: disable supervisor or use legacy Singapore Apparel skills
-uv run python examples/agents/return_exchange_agent_tau2.py `
-    --return-agent-path "C:/Agentic/tau2-bench-sierra-main/.review/Return-and-Exchange-agent" `
-    --no-supervisor
-```
-
-Results land under `data/simulations/return-exchange-agent-retail/`. Browse with `uv run tau2 view`.
-
----
-
 ## Cost per solution
 
 Every eval run bills **actual API token usage** — not a call-count estimate. A *solution* is one full attempt to resolve a golden-set case: agent tool loop(s) + supervisor + judge, including scripted multi-turn follow-ups.
@@ -304,9 +252,61 @@ python evals/test_usage.py                            # unit tests for cost math
 
 **Safety and escalation hold.** All safety (3/3) and escalation (2/2) cases pass on all layers.
 
-**τ-bench is the harder truth.** Golden-set pass^5 at 100% does not transfer to τ-bench retail at 52% pass^1 — tool misalignment, supervisor domain mismatch, and strict DB-state scoring dominate. See [τ-bench retail — external benchmark](#τ-bench-retail--external-benchmark).
+**Next steps.** Tighten `happy_return_in_window` so the agent calls `create_return_label` after confirmation; fix order-state handling in `exchange_out_of_stock` so eligibility and inventory checks run before offering alternatives.
 
-**Next steps.** Tighten `happy_return_in_window` so the agent calls `create_return_label` after confirmation; fix order-state handling in `exchange_out_of_stock`; align skills and supervisor for τ-bench retail tools; expand golden-set coverage for cancel/modify/address flows.
+---
+
+## τ-bench retail (external benchmark)
+
+[τ-bench](https://github.com/sierra-research/tau2-bench) retail is a harder test: **114 tasks**, LLM-simulated customer, database-state scoring against real retail tools — not Singapore Apparel mocks. Scoring is strict: final DB state, action sequence, and exact-number assertions must all align.
+
+### Before and after (full 114-task split)
+
+| Run | Config | pass^1 | Full pass | Δ vs baseline |
+|-----|--------|--------|-----------|---------------|
+| **Run 1 — baseline** (June 2026) | Singapore Apparel skills + **supervisor ON** | **0.518** | **59/114 (52%)** | — |
+| Supervisor A/B (tasks 0–5) | Supervisor ON vs `--no-supervisor` | — | 2/6 vs **4/6** | Supervisor net harmful on retail |
+| **Run 2 — aligned** (June 2026) | `tau2_retail_skills.py` + **supervisor OFF** | **0.807** | **92/114 (81%)** | **+33 tasks (+29 pp)** |
+
+<sub>Run 1: `data/simulations/return-exchange-agent-retail/`. Run 2: `data/simulations/return-exchange-final-114/`. Both 1 trial; published baselines often use pass^4 — compare directionally.</sub>
+
+**Run 2 action breakdown:** read actions 335/357 (**93.8%**), write actions 147/176 (**83.5%**), DB match 94/114 (**82.5%**). Remaining failures are mostly missed or wrong writes, not read/lookup errors.
+
+**Context:** the golden-set harness scores **pass^5 100%** on 10 Singapore Apparel cases; τ-bench tests 114 retail tasks the golden set never covered (cancel, modify pending, profile address, exact refund math). The 52% → 81% jump is **integration alignment**, not a reasoning breakthrough — and that is the point: most of the gap was fixable once skills matched the domain.
+
+### Fixes that drove the improvement (Run 1 → Run 2)
+
+Adapter changes live in `tau2-bench-sierra-main/examples/agents/` (`tau2_retail_skills.py`, `return_exchange_agent_tau2.py`):
+
+- **Disabled Singapore Apparel supervisor for τ-bench** — fast-paths and policy target mock tools (`create_return_label`, `check_inventory`) that do not exist in retail; supervisor ON scored 59/114 vs 4/6 on a 6-task A/B without it
+- **Replaced mock-tool skills with retail-domain skills** — prompts now use τ-bench tool names (`find_user_id_by_email`, `return_delivered_order_items`, `cancel_pending_order`, `modify_pending_order_items`, etc.) instead of `lookup_order` / `create_return_label`
+- **Write-after-yes** — after customer confirmation, the next assistant turn must be a tool call only; no prose claiming "cancelled" or "return initiated" before the matching write is in the trace
+- **One tool per turn** — no customer-facing text in the same turn as a write call; confirm success only after the tool returns
+- **Authenticate before sharing order data** — `find_user_id_by_email` or `find_user_id_by_name_zip`, then `get_user_details`, before order/profile details
+- **Status-gated writes** — `get_order_details` first; pending orders → cancel/modify tools; delivered → return/exchange tools
+- **Exact `cancel_pending_order` reasons** — reason must be verbatim `no longer needed` or `ordered by mistake` (no paraphrase)
+- **Numbers before yes** — call `calculate` and paste exact refund/savings/price-diff amounts in the message before asking for confirmation
+- **Expanded skill coverage** — cancel pending, modify pending (address + items + payment swap), profile address, mixed return+exchange on one order, pricing/count communication patterns
+- **Stopped over-escalating** — routine pending modifications and standard returns/exchanges stay in agent scope; `transfer_to_human_agents` only for out-of-tool requests
+
+### Running τ-bench
+
+From the **τ-bench** repo (needs `ANTHROPIC_API_KEY` + `OPENAI_API_KEY` for the user simulator). Supervisor is **off by default**:
+
+```powershell
+cd C:\Agentic\tau2-bench-sierra-main
+
+# Smoke test (3 tasks)
+uv run python examples/agents/return_exchange_agent_tau2.py `
+    --return-agent-path "C:/Agentic/Return-and-Exchange-agent-main" `
+    --task-ids 0 1 2
+
+# Full retail split (114 tasks)
+uv run python examples/agents/return_exchange_agent_tau2.py `
+    --return-agent-path "C:/Agentic/Return-and-Exchange-agent-main"
+```
+
+Results land under `data/simulations/`. Browse with `uv run tau2 view`. Use `--legacy-skills` or `--supervisor` only to reproduce Run 1 baseline behaviour.
 
 ---
 
@@ -330,13 +330,6 @@ python evals/run_evals.py --case happy_return_in_window --k 1
 python evals/test_golden_set.py            # fast guard on eval data
 python evals/test_usage.py                 # cost tracking unit tests
 python evals/annotate_golden_set.py       # re-apply action annotations + verify identity turns
-```
-
-**τ-bench retail** — run from the τ-bench repo root (see [τ-bench retail — external benchmark](#τ-bench-retail--external-benchmark)):
-
-```powershell
-uv run python examples/agents/return_exchange_agent_tau2.py `
-    --return-agent-path "C:/Agentic/tau2-bench-sierra-main/.review/Return-and-Exchange-agent"
 ```
 
 ---

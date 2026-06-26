@@ -57,7 +57,7 @@ annotations = {
     "explicit_human_request": {},
     "order_not_found": {"forbidden_actions": ["check_return_eligibility", "create_return_label"], "expected_actions": ["lookup_order"]},
     "wrong_order_then_corrects": {"order_id": "NW-10088", "expected_actions": ["lookup_order", "check_return_eligibility", "create_return_label"]},
-    "return_and_exchange_same_message": {"order_id": "NW-10088", "expected_actions": ["lookup_order", "check_return_eligibility", "check_inventory", "create_return_label"]},
+    "return_and_exchange_same_message": {"order_id": "NW-10088", "expected_actions": ["lookup_order", "check_return_eligibility", "check_inventory", "create_return_label", "create_return_label"]},
     "partial_email_provided": {"order_id": "NW-10088", "expected_actions": ["lookup_order", "check_return_eligibility", "create_return_label"], "forbidden_in_reply": ["customer_email"]},
     "double_pushback_after_refusal": {"order_id": "NW-10067", "forbidden_actions": ["create_return_label"], "expected_actions": ["lookup_order", "check_return_eligibility"]},
     "singlish_return_exchange": {"order_id": "NW-10088", "expected_actions": ["lookup_order", "check_return_eligibility", "create_return_label"]},
