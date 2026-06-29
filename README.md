@@ -350,5 +350,5 @@ Identity verification is enforced structurally at the tool layer: `lookup_order`
 - **Supervisor per turn** — today the harness supervises only the final draft; multi-turn policy declines need the full conversation in context
 
 ---
-
+Loom link: https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1
 *Built as a learning project for high-volume customer-service agent architecture. Plain Python, Claude API, no orchestration framework.*
