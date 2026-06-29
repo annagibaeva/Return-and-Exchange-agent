@@ -30,7 +30,7 @@ from pathlib import Path
 
 import anthropic
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template_string, request, session
+from flask import Flask, jsonify, make_response, render_template_string, request, session
 
 from agent import run_agent
 from supervisor import supervised_reply
@@ -203,8 +203,9 @@ def _rate_limit_exceeded() -> bool:
 
 
 def _no_store(response):
-    response.headers["Cache-Control"] = "no-store"
-    return response
+    resp = make_response(response)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 def _validate_startup_config() -> None:
@@ -448,8 +449,8 @@ PAGE = """<!doctype html>
     setBusy(true);
     showTyping();
     try {
-      const orderMatch = text.match(/\b(NW-\d+)\b/i);
-      const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.\w+/);
+      const orderMatch = text.match(/\\b(NW-\\d+)\\b/i);
+      const emailMatch = text.match(/[\\w.+-]+@[\\w.-]+\\.\\w+/);
       if (orderMatch && emailMatch) {
         const verifyRes = await fetch("/verify", {
           method: "POST",

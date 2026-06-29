@@ -15,7 +15,7 @@ Extended docs live in [`docs/`](docs/):
 | [architecture.md](docs/architecture.md) | System design — components, request flow, tools, supervisor, eval harness, cost tracking |
 | [demo-script.md](docs/demo-script.md) | Presenter-ready live demo script with order IDs, talking points, and timing guides |
 | [case-study.md](docs/case-study.md) | Build-and-harden narrative — eval journey, bugs found, pass^5, lessons learned |
-| [outputs.md](docs/outputs.md) | Portfolio summary — project outputs, proof bundle, recruiter hook, success criteria |
+| [outputs.md](docs/outputs.md) | Portfolio summary — project outputs, proof bundle, summary, success criteria |
 | [demo-script-3min.md](docs/demo-script-3min.md) | ~3 min Loom/video script — happy path, identity refusal, harness, τ²-bench |
 
 ---
@@ -258,7 +258,7 @@ python evals/test_usage.py                            # unit tests for cost math
 
 ## τ-bench retail (external benchmark)
 
-[τ-bench](https://github.com/sierra-research/tau2-bench) retail is a harder test: **114 tasks**, LLM-simulated customer, database-state scoring against real retail tools — not Singapore Apparel mocks. Scoring is strict: final DB state, action sequence, and exact-number assertions must all align.
+τ-bench retail is a harder test: **114 tasks**, LLM-simulated customer, database-state scoring against real retail tools — not Singapore Apparel mocks. Scoring is strict: final DB state, action sequence, and exact-number assertions must all align.
 
 ### Before and after (full 114-task split)
 
@@ -276,7 +276,7 @@ python evals/test_usage.py                            # unit tests for cost math
 
 ### Fixes that drove the improvement (Run 1 → Run 2)
 
-Adapter changes live in `tau2-bench-sierra-main/examples/agents/` (`tau2_retail_skills.py`, `return_exchange_agent_tau2.py`):
+Adapter changes live in the τ-bench repo under `examples/agents/` (`tau2_retail_skills.py`, `return_exchange_agent_tau2.py`):
 
 - **Disabled Singapore Apparel supervisor for τ-bench** — fast-paths and policy target mock tools (`create_return_label`, `check_inventory`) that do not exist in retail; supervisor ON scored 59/114 vs 4/6 on a 6-task A/B without it
 - **Replaced mock-tool skills with retail-domain skills** — prompts now use τ-bench tool names (`find_user_id_by_email`, `return_delivered_order_items`, `cancel_pending_order`, `modify_pending_order_items`, etc.) instead of `lookup_order` / `create_return_label`
@@ -294,7 +294,7 @@ Adapter changes live in `tau2-bench-sierra-main/examples/agents/` (`tau2_retail_
 From the **τ-bench** repo (needs `ANTHROPIC_API_KEY` + `OPENAI_API_KEY` for the user simulator). Supervisor is **off by default**:
 
 ```powershell
-cd C:\Agentic\tau2-bench-sierra-main
+cd path\to\tau2-bench
 
 # Smoke test (3 tasks)
 uv run python examples/agents/return_exchange_agent_tau2.py `

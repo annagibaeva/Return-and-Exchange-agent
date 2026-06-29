@@ -1,10 +1,10 @@
 # Outputs (project)
 
-## 1. Company card
+## 1. Context
 
-**Sierra** — customer-facing agent design for CX automation and measurable performance.
+**CX agent design** — customer-facing automation with measurable performance.
 
-This project mirrors Sierra’s bar: production-shaped workflows (not FAQ chat), structural guardrails (identity, policy, approval gates), and reliability you can defend with benchmarks — including τ²-bench retail alongside a custom golden set.
+This project targets a production bar: production-shaped workflows (not FAQ chat), structural guardrails (identity, policy, approval gates), and reliability you can defend with benchmarks — including τ²-bench retail alongside a custom golden set.
 
 ---
 
@@ -89,7 +89,7 @@ Composable skill prompts: `skills/eligibility.py`, `return_flow.py`, `exchange.p
 
 ---
 
-## 5. Recruiter hook
+## 5. Summary
 
 Built a returns/exchange agent for a fictional apparel retailer that orchestrates mock OMS tools in sequence (not RAG), supervises drafts before send, and ships a three-layer eval harness that caught real bugs the LLM judge missed — reaching **pass^5 100% on 10 core cases** at temperature 1.0 and **52% on τ²-bench retail** (59/114 tasks). Policy lives in config, PII is blocked at the tool layer, and every eval run reports cost per resolution.
 

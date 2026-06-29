@@ -6,23 +6,39 @@
 
 ## Before you record — prep checklist
 
-**Start the server** (this machine's real Python is shadowed by the Windows Store stub, so use the full path — plain `python` will not work):
+### 1. Start the server
+
+Open PowerShell and paste this **as one block** (don't paste line-by-line — the `>>` prompt means PowerShell is still waiting). It moves to the project folder, sets the port + a stable session key, and starts the app:
 
 ```powershell
+cd "c:\Agentic\Return-and-Exchange-agent-main"
+$env:PORT = "8000"
+$env:FLASK_SECRET_KEY = "demo-stable-secret-key-do-not-use-in-prod-0001"
 & "C:\Users\antho\AppData\Local\Programs\Python\Python312\python.exe" app.py
 ```
 
-First time only — install deps into that Python: `& "C:\Users\antho\AppData\Local\Programs\Python\Python312\python.exe" -m pip install -r requirements.txt`
+Leave that terminal open — closing it stops the server. You'll see `Running on http://127.0.0.1:8000`.
 
-**Then, before you hit record:**
+> **Why the full Python path?** On this machine plain `python` hits the Windows Store stub and does nothing. The real Python lives at `C:\Users\antho\AppData\Local\Programs\Python\Python312\python.exe`.
+> **First time only** — install deps: `& "C:\Users\antho\AppData\Local\Programs\Python\Python312\python.exe" -m pip install -r requirements.txt`
 
-- [ ] Browser open to **http://localhost:5000**; page loads (hard-refresh **Ctrl+Shift+R** if you saw an error earlier).
+### 2. Open the app
+
+The working URL is **http://127.0.0.1:8000/** — type it with the `http://` (a bare address can auto-upgrade to https, which this server doesn't speak).
+
+### 3. Pre-record checklist
+
+- [ ] Page loads at **http://127.0.0.1:8000/** and shows the chat box (hard-refresh **Ctrl+Shift+R** if you see a stale error).
 - [ ] `.env` has a valid `ANTHROPIC_API_KEY` (already present on this machine).
-- [ ] A **terminal** open in the project folder for the eval-harness beat (§1:30, Part 1).
-- [ ] Your **tau²-bench** result on screen and ready to show — the retail run output or the README table (§1:30, Part 2).
-- [ ] Click **New chat** between every scenario (clears the verified session — without this, scenario 4's refusal won't trigger).
-- [ ] Close noisy tabs / notifications; zoom the browser so the chat bubbles and tool flow are readable on video.
-- [ ] Do one silent dry-run of Scenario 1 so the first recorded reply isn't a cold-start delay.
+- [ ] A **second terminal** open in the project folder for the eval-harness beat (§1:30, Part 1).
+- [ ] Your **tau²-bench** result on screen and ready to show — the retail run output or README table (§1:30, Part 2).
+- [ ] **Click New chat between every scenario.** This resets identity — required so Scenario 4's refusal triggers, and so Scenario 1 starts clean.
+- [ ] Close noisy tabs / notifications; zoom the browser (Ctrl++) so the chat bubbles read clearly on video.
+- [ ] Do one silent dry-run of Scenario 1 so the first *recorded* reply isn't a cold-start delay.
+
+### 4. The one rule that makes the demo work: identity
+
+The page auto-verifies you **only when your message contains the order ID *and* the matching email together**. Put both in the same message (Scenario 1 does). If you omit the email, the agent stays unverified and you'll get a refusal/ESCALATE instead of a label — correct behavior, but not the happy path you want to show first.
 
 > Eval-harness command for the benchmark beat:
 > `& "C:\Users\antho\AppData\Local\Programs\Python\Python312\python.exe" evals/run_evals.py --case happy_return_in_window --k 1 --verbose`
@@ -40,7 +56,7 @@ The goal: an agent that actually *completes* the workflow — order lookup → e
 
 ## 0:35 – 1:30 · The agent running live
 
-*Screen-share the chat UI at localhost:5000. Send Scenario 1.*
+*Screen-share the chat UI at http://127.0.0.1:8000/. New chat, then send Scenario 1.*
 
 **Return flow.** Maya wants to return wool socks. Watch the tool sequence fire: it looks up the order, checks eligibility against Singapore's 30-day window, *then* creates the return label — never a label before eligibility. Identity was verified server-side from her email, so it shares line items only after that gate passes.
 
@@ -52,7 +68,7 @@ The goal: an agent that actually *completes* the workflow — order lookup → e
 
 **Part 1 — my own eval harness.** *Switch to terminal, run a case.* Every golden-set case is scored on three layers: did the right tools fire, did the reply leak forbidden data, and does an LLM judge agree on substance — all three must pass. The arc: **5 of 10** passing, to **8 of 10** once I scripted multi-turn identity, and action-scoring caught two real bugs the LLM judge waved through. After fixing them: **pass^5 at 100%** across all 10 core cases at temperature 1.0 — consistent over five independent runs, not one lucky pass.
 
-**Part 2 — tau²-bench (Sierra).** *Show a tau²-bench run or README table.* I also validated against τ²-bench retail — 114 tasks, simulated customer, database-state scoring — so reliability isn't measured only against my own golden set. On retail with supervisor off (retail tools differ from Singapore Apparel mocks): **59/114 pass^1 (52%)** with Claude Sonnet 4.6.
+**Part 2 — tau²-bench (external benchmark).** *Show a tau²-bench run or README table.* I also validated against τ²-bench retail — 114 tasks, simulated customer, database-state scoring — so reliability isn't measured only against my own golden set. On retail with supervisor off (retail tools differ from Singapore Apparel mocks): **59/114 pass^1 (52%)** with Claude Sonnet 4.6.
 
 ## 2:25 – 2:40 · Outcome, impact, value
 
@@ -66,7 +82,7 @@ Next: connect it to a real order system, make replies faster and stream them, lo
 
 ## On-screen scenarios — exactly what to type
 
-*Click **New chat** before each one. Type messages into the chat at http://localhost:5000.*
+*Click **New chat** before each one. Type messages into the chat at http://127.0.0.1:8000/.*
 
 ### Scenario 1 — Happy-path return (§0:35, Spotlight 1)
 
