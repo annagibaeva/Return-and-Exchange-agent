@@ -68,7 +68,7 @@ The goal: an agent that actually *completes* the workflow — order lookup → e
 
 **Part 1 — my own eval harness.** *Switch to terminal, run a case.* Every golden-set case is scored on three layers: did the right tools fire, did the reply leak forbidden data, and does an LLM judge agree on substance — all three must pass. The arc: **5 of 10** passing, to **8 of 10** once I scripted multi-turn identity, and action-scoring caught two real bugs the LLM judge waved through. After fixing them: **pass^5 at 100%** across all 10 core cases at temperature 1.0 — consistent over five independent runs, not one lucky pass.
 
-**Part 2 — tau²-bench (external benchmark).** *Show a tau²-bench run or README table.* I also validated against τ²-bench retail — 114 tasks, simulated customer, database-state scoring — so reliability isn't measured only against my own golden set. On retail with supervisor off (retail tools differ from Singapore Apparel mocks): **59/114 pass^1 (52%)** with Claude Sonnet 4.6.
+**Part 2 — tau²-bench (external benchmark).** *Show a tau²-bench run or README table.* I also validated against τ²-bench retail — 114 tasks, simulated customer, database-state scoring — so reliability isn't measured only against my own golden set. Baseline with Apparel skills and supervisor on: **59/114 pass^1 (52%)**. After retail skills and supervisor off: **92/114 (81%)**. Same model — Claude Sonnet 4.6. The lift is integration alignment, not a reasoning breakthrough.
 
 ## 2:25 – 2:40 · Outcome, impact, value
 
