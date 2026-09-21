@@ -16,7 +16,7 @@ This project targets a production bar: production-shaped workflows (not FAQ chat
 |-----------|--------|
 | **Scope** | End-to-end returns/exchange flows: order lookup → eligibility → inventory (exchanges) → return label, with region-specific policy (`policy.yaml`), identity gates, supervisor audit, and multi-turn eval replay |
 | **Success criteria (original)** | Complete scored scenarios with ≥90% correct policy application and safe handoff |
-| **Success criteria (achieved)** | **10/10 core cases at pass^5 (100%)** at temperature 1.0 after multi-turn harness + bug fixes; **15-case golden set** with three-layer scoring (actions, content, judge); external validation on **τ²-bench retail: 59/114 (52%)** pass^1 |
+| **Success criteria (achieved)** | **10/10 core cases at pass^5 (100%)** at temperature 1.0 after multi-turn harness + bug fixes; **15-case golden set** with three-layer scoring (actions, content, judge); external validation on **τ²-bench retail** (pass^1, Claude Sonnet 4.6, June 2026): baseline **59/114 (52%)** with Apparel skills + supervisor ON; A/B tasks 0–5 supervisor ON **2/6** vs `--no-supervisor` **4/6**; then aligned **92/114 (81%)** with `tau2_retail_skills` + supervisor OFF (+29 pp / +33 tasks; reads 335/357 (93.8%), writes 147/176 (83.5%), DB 94/114 (82.5%)) — integration alignment, not a reasoning breakthrough |
 | **What it proves** | Tool orchestration and sequencing (not RAG); hybrid deterministic + LLM eval that catches judge/action divergences; pass^k reliability under sampling variance; cost-per-resolution visibility (~$0.05–0.10/solution) |
 
 ### Eval arc (measurable)
@@ -91,7 +91,7 @@ Composable skill prompts: `skills/eligibility.py`, `return_flow.py`, `exchange.p
 
 ## 5. Summary
 
-Built a returns/exchange agent for a fictional apparel retailer that orchestrates mock OMS tools in sequence (not RAG), supervises drafts before send, and ships a three-layer eval harness that caught real bugs the LLM judge missed — reaching **pass^5 100% on 10 core cases** at temperature 1.0 and **52% on τ²-bench retail** (59/114 tasks). Policy lives in config, PII is blocked at the tool layer, and every eval run reports cost per resolution.
+Built a returns/exchange agent for a fictional apparel retailer that orchestrates mock OMS tools in sequence (not RAG), supervises drafts before send, and ships a three-layer eval harness that caught real bugs the LLM judge missed — reaching **pass^5 100% on 10 core cases** at temperature 1.0, and on **τ²-bench retail** moving from a **59/114 (52%)** baseline (Apparel skills + supervisor ON) to **92/114 (81%)** after retail skills + supervisor OFF (pass^1; Claude Sonnet 4.6; June 2026). The lift is integration alignment, not a reasoning breakthrough. Policy lives in config, PII is blocked at the tool layer, and every eval run reports cost per resolution.
 
 ---
 
@@ -99,7 +99,7 @@ Built a returns/exchange agent for a fictional apparel retailer that orchestrate
 
 | Criterion | Delivered |
 |-----------|-----------|
-| **Publish measurable outcomes** | Eval arc 50% → 80% → pass^5 100%; suite breakdowns; judge/action divergence reporting; pass^k at temp 1.0; τ²-bench retail baseline |
+| **Publish measurable outcomes** | Eval arc 50% → 80% → pass^5 100%; suite breakdowns; judge/action divergence reporting; pass^k at temp 1.0; τ²-bench retail **59/114 (52%)** baseline → **92/114 (81%)** aligned |
 | **Scenario scores + error taxonomy** | Per-case ACTION / CONTENT / JUDGE; documented failure modes (`happy_return_in_window`, `exchange_out_of_stock`) and fixes |
 | **Regression suite** | `evals/golden_set.jsonl` + `evals/run_evals.py` + `evals/test_golden_set.py`; adversarial suite (5 cases) ready for pass^5 |
 | **README** | ✅ |
