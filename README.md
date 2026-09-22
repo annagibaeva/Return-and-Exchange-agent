@@ -61,7 +61,17 @@ A second model call verifies the draft against policy before anything reaches th
 
 ### 3. Composable skills, not one mega-prompt
 
-The agent is built from skill modules (`skills/eligibility.py`, `skills/exchange.py`, `skills/escalation.py`), each with its own prompt fragment. Adding capability as a skill makes it easier to test, extend, and reason about what the agent can and cannot do.
+The agent's instructions are assembled from five modules in `skills/`, each exposing a `NAME`, a `DESCRIPTION` and a `PROMPT` fragment. `assemble_skill_prompt()` concatenates them in registry order into the cached system prefix:
+
+| Skill | Module | What it governs |
+|---|---|---|
+| `eligibility` | `eligibility.py` | Look up the order first, check the specific SKU, respect the verdict — and never invent a policy exception |
+| `return` | `return_flow.py` | Complete a refund return, and actually call `create_return_label` rather than confirming one in prose |
+| `exchange` | `exchange.py` | Size and colour exchanges: confirm eligibility, then check inventory for the *requested* replacement size |
+| `mixed_return_and_exchange` | `mixed_resolution.py` | A refund return and an exchange on the same order, kept as separate resolutions per SKU |
+| `escalation` | `escalation.py` | When to hand to a human: identity mismatch, order not found, refunds and goodwill credits, insistence after one explanation |
+
+Order matters — `eligibility` composes first and `escalation` last. Adding a capability means registering a module rather than growing one prompt, which keeps each fragment separately testable and puts what the agent can and cannot do in one readable place.
 
 ### Policy & determinism
 
