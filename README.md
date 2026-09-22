@@ -2,6 +2,8 @@
 
 A production-shaped customer-service agent for retail returns and exchanges at **Singapore Apparel** (fictional retailer), built in plain Python on the Claude API. It is not a RAG chatbot — it orchestrates tool calls against mock systems of record, supervises its own outputs, and ships with an eval harness that measures reliability before and after changes.
 
+**[Watch the 3-minute demo on Loom](https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1)** — happy path, identity refusal, the eval harness, and the τ²-bench run.
+
 The goal is to simulate a real-world scenario: an agent that can be productionised and placed in front of customers, with end-to-end sequencing and policy guardrails you can score deterministically.
 
 ---
@@ -18,10 +20,6 @@ Extended docs live in [`docs/`](docs/):
 | [outputs.md](docs/outputs.md) | Portfolio summary — project outputs, proof bundle, summary, success criteria |
 | [demo-script-3min.md](docs/demo-script-3min.md) | ~3 min Loom/video script — happy path, identity refusal, harness, τ²-bench |
 | [tau2-teardown.md](docs/tau2-teardown.md) | τ²-bench teardown — what the benchmark grades, why the supervisor hurt the score, pre-production checklist |
-
-### Video walkthrough
-
-[Watch the demo on Loom](https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1)
 
 ### τ²-bench teardown
 
