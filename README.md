@@ -45,32 +45,7 @@ Three design commitments, each addressing a failure mode that shows up when you 
   <img src="architecture.svg" alt="Returns and exchange agent architecture" width="900">
 </p>
 
-<sub>Customer message → primary agent (plans tool calls) → composable skills → systems of record → supervisor (policy / PII / approval check) → send to customer, or revise / escalate. Every change is scored by the eval harness.</sub>
-
-```
-                          ┌─────────────────┐
-   customer message  ─────▶   Primary agent  │
-                          │  (Claude + tools)│
-                          └────────┬─────────┘
-                                   │ drafts response + tool calls
-                                   ▼
-                          ┌─────────────────┐         systems of record
-                          │     Skills      │◀───────▶ lookup_order
-                          │ eligibility /   │         check_return_eligibility
-                          │ exchange /      │         check_inventory
-                          │ escalation      │         create_return_label
-                          └────────┬────────┘
-                                   │ proposed response
-                                   ▼
-                          ┌─────────────────┐
-                          │   Supervisor    │  ── policy check, PII check,
-                          │  (2nd Claude    │     approval-gate check
-                          │   call)         │
-                          └────────┬────────┘
-                                   │ pass → send   │ fail → revise / escalate
-                                   ▼
-                              customer / human
-```
+<sub>One customer turn, end to end. Every node is tagged <b>MODEL CALL</b> or <b>DETERMINISTIC</b>: the agent plans and the supervisor audits (Claude Sonnet 4.6); the tool loop, the identity and PII checks and the fast-path rule test are code. A reply reaches the customer either because a fast-path rule fired — no second model call — or because the supervisor returned PASS. REVISE re-drafts once; ESCALATE is terminal. The eval harness wraps the runtime and blocks nothing.</sub>
 
 ### 1. Tool orchestration against systems of record
 
