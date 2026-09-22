@@ -17,6 +17,15 @@ Extended docs live in [`docs/`](docs/):
 | [case-study.md](docs/case-study.md) | Build-and-harden narrative — eval journey, bugs found, pass^5, lessons learned |
 | [outputs.md](docs/outputs.md) | Portfolio summary — project outputs, proof bundle, summary, success criteria |
 | [demo-script-3min.md](docs/demo-script-3min.md) | ~3 min Loom/video script — happy path, identity refusal, harness, τ²-bench |
+| [tau2-teardown.md](docs/tau2-teardown.md) | τ²-bench teardown — what the benchmark grades, why the supervisor hurt the score, pre-production checklist |
+
+### Video walkthrough
+
+[Watch the demo on Loom](https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1)
+
+### τ²-bench teardown
+
+[What broke when I ran this agent on τ²-bench retail](docs/tau2-teardown.md) — Sierra's public benchmark for customer-service agents. 52% → 81% on the same model, the guardrail that caused most of the gap, and the checklist I would clear before putting this in front of a real account.
 
 ---
 
@@ -33,35 +42,10 @@ Extended docs live in [`docs/`](docs/):
 Three design commitments, each addressing a failure mode that shows up when you move from demo to production.
 
 <p align="center">
-  <img src="architecture.svg" alt="Returns and exchange agent architecture" width="640">
+  <img src="architecture.svg" alt="Returns and exchange agent architecture" width="900">
 </p>
 
-<sub>Customer message → primary agent (plans tool calls) → composable skills → systems of record → supervisor (policy / PII / approval check) → send to customer, or revise / escalate. Every change is scored by the eval harness.</sub>
-
-```
-                          ┌─────────────────┐
-   customer message  ─────▶   Primary agent  │
-                          │  (Claude + tools)│
-                          └────────┬─────────┘
-                                   │ drafts response + tool calls
-                                   ▼
-                          ┌─────────────────┐         systems of record
-                          │     Skills      │◀───────▶ lookup_order
-                          │ eligibility /   │         check_return_eligibility
-                          │ exchange /      │         check_inventory
-                          │ escalation      │         create_return_label
-                          └────────┬────────┘
-                                   │ proposed response
-                                   ▼
-                          ┌─────────────────┐
-                          │   Supervisor    │  ── policy check, PII check,
-                          │  (2nd Claude    │     approval-gate check
-                          │   call)         │
-                          └────────┬────────┘
-                                   │ pass → send   │ fail → revise / escalate
-                                   ▼
-                              customer / human
-```
+<sub>One customer turn, end to end. Every node is tagged <b>MODEL CALL</b> or <b>DETERMINISTIC</b>: the agent plans and the supervisor audits (Claude Sonnet 4.6); the tool loop, the identity and PII checks and the fast-path rule test are code. A reply reaches the customer either because a fast-path rule fired — no second model call — or because the supervisor returned PASS. REVISE re-drafts once; ESCALATE is terminal. The eval harness wraps the runtime and blocks nothing.</sub>
 
 ### 1. Tool orchestration against systems of record
 
@@ -77,7 +61,17 @@ A second model call verifies the draft against policy before anything reaches th
 
 ### 3. Composable skills, not one mega-prompt
 
-The agent is built from skill modules (`skills/eligibility.py`, `skills/exchange.py`, `skills/escalation.py`), each with its own prompt fragment. Adding capability as a skill makes it easier to test, extend, and reason about what the agent can and cannot do.
+The agent's instructions are assembled from five modules in `skills/`, each exposing a `NAME`, a `DESCRIPTION` and a `PROMPT` fragment. `assemble_skill_prompt()` concatenates them in registry order into the cached system prefix:
+
+| Skill | Module | What it governs |
+|---|---|---|
+| `eligibility` | `eligibility.py` | Look up the order first, check the specific SKU, respect the verdict — and never invent a policy exception |
+| `return` | `return_flow.py` | Complete a refund return, and actually call `create_return_label` rather than confirming one in prose |
+| `exchange` | `exchange.py` | Size and colour exchanges: confirm eligibility, then check inventory for the *requested* replacement size |
+| `mixed_return_and_exchange` | `mixed_resolution.py` | A refund return and an exchange on the same order, kept as separate resolutions per SKU |
+| `escalation` | `escalation.py` | When to hand to a human: identity mismatch, order not found, refunds and goodwill credits, insistence after one explanation |
+
+Order matters — `eligibility` composes first and `escalation` last. Adding a capability means registering a module rather than growing one prompt, which keeps each fragment separately testable and puts what the agent can and cannot do in one readable place.
 
 ### Policy & determinism
 
@@ -278,7 +272,7 @@ python evals/test_usage.py                            # unit tests for cost math
 
 Adapter changes live in the τ-bench repo under `examples/agents/` (`tau2_retail_skills.py`, `return_exchange_agent_tau2.py`):
 
-- **Disabled Singapore Apparel supervisor for τ-bench** — fast-paths and policy target mock tools (`create_return_label`, `check_inventory`) that do not exist in retail; supervisor ON scored 59/114 vs 4/6 on a 6-task A/B without it
+- **Disabled Singapore Apparel supervisor for τ-bench** — fast-paths and policy target mock tools (`create_return_label`, `check_inventory`) that do not exist in retail; on a 6-task A/B, supervisor ON scored 2/6 vs 4/6 with it off
 - **Replaced mock-tool skills with retail-domain skills** — prompts now use τ-bench tool names (`find_user_id_by_email`, `return_delivered_order_items`, `cancel_pending_order`, `modify_pending_order_items`, etc.) instead of `lookup_order` / `create_return_label`
 - **Write-after-yes** — after customer confirmation, the next assistant turn must be a tool call only; no prose claiming "cancelled" or "return initiated" before the matching write is in the trace
 - **One tool per turn** — no customer-facing text in the same turn as a write call; confirm success only after the tool returns
@@ -350,5 +344,5 @@ Identity verification is enforced structurally at the tool layer: `lookup_order`
 - **Supervisor per turn** — today the harness supervises only the final draft; multi-turn policy declines need the full conversation in context
 
 ---
-Loom link: https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1
+
 *Built as a learning project for high-volume customer-service agent architecture. Plain Python, Claude API, no orchestration framework.*
