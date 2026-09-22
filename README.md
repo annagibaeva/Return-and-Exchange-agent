@@ -143,6 +143,15 @@ Identity follow-ups (email + confirmation) are **not** stored in `golden_set.jso
 
 ## Pass^k reliability scoring
 
+**CI gate.** `.github/workflows/evals.yml` runs the structural tests on every push, and on every PR into `main` runs `pass^5` across the four core suites with the bar declared in the workflow rather than read off the results afterwards:
+
+```bash
+python evals/run_evals.py --k 5 --exclude-suite adversarial --min-pass-k 1.0
+```
+
+`--min-pass-k` makes `run_evals.py` exit non-zero when the pass^k rate falls below the bar, so a regression fails the check. An empty case selection also fails: a gate that goes green because nothing ran is worse than no gate. The adversarial suite is excluded until it has been run at pass^5 at least once. The job skips with a warning until `ANTHROPIC_API_KEY` is set on the repository.
+
+
 **Why does it matter** Average pass rates hide unreliability of your agent. An agent that passes 80% of the time per attempt looks fine on a single run but fails one in five customers — unacceptable at production scale. pass^k asks a stricter question: across k identical runs, does the case pass every time? Agent needs to work on any run whether it is reporting pass@1 (single attempt), mean pass-rate, and pass^5. Objective is to ensure that there is no gap between "usually works" and "reliably works" visible — this is matters for trust.
 
 **What i did**

@@ -401,6 +401,21 @@ def estimate_api_calls(cases, orders, k):
     return k * (conv_stages * 2 + len(cases))  # agent+supervisor per stage, judge per case-run
 
 
+def gate_verdict(passed, total, min_rate):
+    """Decide whether a pass^k run clears the declared bar.
+
+    Returns (ok, rate, reason). Zero cases is a failure, not a pass: an empty
+    selection verifies nothing, and a gate that goes green on nothing is worse
+    than no gate at all.
+    """
+    if total <= 0:
+        return False, 0.0, "no cases selected, nothing verified"
+    rate = passed / total
+    if rate < min_rate:
+        return False, rate, f"{rate:.1%} below the required {min_rate:.1%}"
+    return True, rate, ""
+
+
 def main():
     # Agent replies contain non-cp1252 characters (→, —, …); on Windows the
     # default console encoding would crash the whole run on the first print.
@@ -429,13 +444,37 @@ def main():
         action="store_true",
         help="print tool trace and full reply for every run (failures always show reasons)",
     )
+    ap.add_argument(
+        "--min-pass-k",
+        type=float,
+        default=None,
+        metavar="RATE",
+        help=(
+            "gate: exit non-zero if the pass^k rate across the selected cases is "
+            "below RATE (0.0-1.0). Declare the bar before the run, not after it. "
+            "Omitted, the harness reports and always exits 0."
+        ),
+    )
+    ap.add_argument(
+        "--exclude-suite",
+        action="append",
+        default=[],
+        metavar="SUITE",
+        help="skip a suite entirely; repeatable (e.g. --exclude-suite adversarial)",
+    )
     args = ap.parse_args()
 
     if args.k < 1:
         ap.error("--k must be at least 1")
+    if args.min_pass_k is not None and not 0.0 <= args.min_pass_k <= 1.0:
+        ap.error("--min-pass-k must be between 0.0 and 1.0")
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     cases = load_cases(args.suite)
+    if args.exclude_suite:
+        skipped = set(args.exclude_suite)
+        cases = [c for c in cases if c["suite"] not in skipped]
+        print(f"Excluding suite(s): {', '.join(sorted(skipped))}")
     if args.case:
         cases = [c for c in cases if c["id"] == args.case]
         if not cases:
@@ -493,6 +532,25 @@ def main():
 
     print_cost_summary(_merge_usage(usage_summaries), args.k)
 
+    total = sum(s["total"] for s in results.values())
+    passed = sum(s["pass_hat_k"] for s in results.values())
+
+    if args.min_pass_k is None:
+        return 0
+
+    ok, rate, reason = gate_verdict(passed, total, args.min_pass_k)
+    print("\n" + "=" * 50)
+    print(
+        f"GATE  pass^{args.k} rate {passed}/{total} ({rate:.1%})  "
+        f"required >= {args.min_pass_k:.1%}"
+    )
+    if ok:
+        print("GATE PASSED")
+        return 0
+    detail = f" — {', '.join(failures)}" if failures else ""
+    print(f"GATE FAILED ({reason}){detail}")
+    return 1
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

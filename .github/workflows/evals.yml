@@ -1,0 +1,80 @@
+name: evals
+
+# Two tiers, deliberately separated by what they cost.
+#
+#   structural  — free, no API calls, runs on every push and PR.
+#   reliability — the pass^5 gate. Real API spend (~50 solutions, roughly $4 a
+#                 run at current Sonnet rates), so it runs only on PRs into
+#                 main and on manual dispatch.
+#
+# The bar is declared here, in the workflow, rather than read off the results
+# afterwards: --min-pass-k 1.0 across the four core suites.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  structural:
+    name: structural checks (no API calls)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Golden set integrity
+        run: python evals/test_golden_set.py
+      - name: Cost tracking math
+        run: python evals/test_usage.py
+      - name: Gate decision logic
+        run: python evals/test_gate.py
+
+  reliability:
+    name: pass^5 gate (core suites)
+    needs: structural
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Check for API key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: pass^5 across happy_path, policy_edges, safety, escalation
+        if: steps.key.outputs.present == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python evals/run_evals.py \
+            --k 5 \
+            --exclude-suite adversarial \
+            --min-pass-k 1.0
+
+      - name: No API key configured
+        if: steps.key.outputs.present != 'true'
+        run: |
+          echo "::warning title=pass^5 gate did not run::ANTHROPIC_API_KEY is not set on this repository, so the reliability gate was skipped. Until that secret exists this workflow reports but does not gate. Add it under Settings > Secrets and variables > Actions."

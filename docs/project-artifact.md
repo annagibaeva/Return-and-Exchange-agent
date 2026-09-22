@@ -50,7 +50,7 @@ The same agent against Sierra's τ²-bench retail: 114 tasks, an LLM-simulated c
 
 ### Open items
 
-1. **Nothing enforces the eval.** `pass^5` and the golden set are run by hand; there is no CI config in the repo. "I won't ship on a regression" is a habit, not a gate.
+1. **The gate is wired but not yet armed.** `.github/workflows/evals.yml` runs `pass^5` at `--min-pass-k 1.0` across the four core suites on every PR into `main`, and `run_evals.py` now exits non-zero when the bar isn't met. It skips with a warning until `ANTHROPIC_API_KEY` is set on the repository, so until that secret exists it reports rather than blocks.
 2. **No pre-registered decision rule.** Neither the τ²-bench comparison nor the pass^5 bar had a threshold written down before the runs, so both were interpreted after the fact.
 3. **The supervisor verdict is discarded in the eval.** `run_evals.py` binds it to `_verdict`, so a case that passed cleanly and a case that passed only after a REVISE are the same number. Cost per resolved case can't be split by path either.
 4. **Latency never instrumented.** The supervisor's extra round-trip per text turn is unquantified.
