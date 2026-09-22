@@ -17,6 +17,15 @@ Extended docs live in [`docs/`](docs/):
 | [case-study.md](docs/case-study.md) | Build-and-harden narrative — eval journey, bugs found, pass^5, lessons learned |
 | [outputs.md](docs/outputs.md) | Portfolio summary — project outputs, proof bundle, summary, success criteria |
 | [demo-script-3min.md](docs/demo-script-3min.md) | ~3 min Loom/video script — happy path, identity refusal, harness, τ²-bench |
+| [tau2-teardown.md](docs/tau2-teardown.md) | τ²-bench teardown — what the benchmark grades, why the supervisor hurt the score, pre-production checklist |
+
+### Video walkthrough
+
+[Watch the demo on Loom](https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1)
+
+### τ²-bench teardown
+
+[What broke when I ran this agent on τ²-bench retail](docs/tau2-teardown.md) — Sierra's public benchmark for customer-service agents. 52% → 81% on the same model, the guardrail that caused most of the gap, and the checklist I would clear before putting this in front of a real account.
 
 ---
 
@@ -33,7 +42,7 @@ Extended docs live in [`docs/`](docs/):
 Three design commitments, each addressing a failure mode that shows up when you move from demo to production.
 
 <p align="center">
-  <img src="architecture.svg" alt="Returns and exchange agent architecture" width="640">
+  <img src="architecture.svg" alt="Returns and exchange agent architecture" width="900">
 </p>
 
 <sub>Customer message → primary agent (plans tool calls) → composable skills → systems of record → supervisor (policy / PII / approval check) → send to customer, or revise / escalate. Every change is scored by the eval harness.</sub>
@@ -278,7 +287,7 @@ python evals/test_usage.py                            # unit tests for cost math
 
 Adapter changes live in the τ-bench repo under `examples/agents/` (`tau2_retail_skills.py`, `return_exchange_agent_tau2.py`):
 
-- **Disabled Singapore Apparel supervisor for τ-bench** — fast-paths and policy target mock tools (`create_return_label`, `check_inventory`) that do not exist in retail; supervisor ON scored 59/114 vs 4/6 on a 6-task A/B without it
+- **Disabled Singapore Apparel supervisor for τ-bench** — fast-paths and policy target mock tools (`create_return_label`, `check_inventory`) that do not exist in retail; on a 6-task A/B, supervisor ON scored 2/6 vs 4/6 with it off
 - **Replaced mock-tool skills with retail-domain skills** — prompts now use τ-bench tool names (`find_user_id_by_email`, `return_delivered_order_items`, `cancel_pending_order`, `modify_pending_order_items`, etc.) instead of `lookup_order` / `create_return_label`
 - **Write-after-yes** — after customer confirmation, the next assistant turn must be a tool call only; no prose claiming "cancelled" or "return initiated" before the matching write is in the trace
 - **One tool per turn** — no customer-facing text in the same turn as a write call; confirm success only after the tool returns
@@ -350,5 +359,5 @@ Identity verification is enforced structurally at the tool layer: `lookup_order`
 - **Supervisor per turn** — today the harness supervises only the final draft; multi-turn policy declines need the full conversation in context
 
 ---
-Loom link: https://www.loom.com/share/ef92a9c39513445c9757e7b0768d42f1
+
 *Built as a learning project for high-volume customer-service agent architecture. Plain Python, Claude API, no orchestration framework.*
