@@ -20,8 +20,17 @@ not executed.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
+
+# Pin the policy clock before tools is imported. The eligibility fixtures are
+# dated (delivered 2026-06-09, +30-day Singapore window), so without this the
+# tool layer falls back to the real wall clock and the eligibility assertions
+# fail once that window closes. This used to pass only because a developer's
+# untracked .env happened to set REFERENCE_DATE; set it here so the test is
+# hermetic and gives the same answer in CI, in a fresh clone, and next year.
+os.environ["REFERENCE_DATE"] = "2026-06-15"
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
