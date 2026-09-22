@@ -4,7 +4,7 @@
 
 Anna Gibaeva · solo build · plain Python, Claude API, no orchestration framework
 
-**Status:** three iterations shipped · no CI gate · adversarial suite written but unrun
+**Status:** three iterations shipped · pass^5 gate wired, awaiting its API-key secret · adversarial suite written but unrun
 
 ---
 
@@ -50,8 +50,8 @@ The same agent against Sierra's τ²-bench retail: 114 tasks, an LLM-simulated c
 
 ### Open items
 
-1. **Nothing enforces the eval.** `pass^5` and the golden set are run by hand; there is no CI config in the repo. "I won't ship on a regression" is a habit, not a gate.
-2. **No pre-registered decision rule.** Neither the τ²-bench comparison nor the pass^5 bar had a threshold written down before the runs, so both were interpreted after the fact.
+1. **The gate is wired but not yet armed.** `.github/workflows/evals.yml` runs `pass^5` at `--min-pass-k 1.0` across the four core suites on every PR into `main`, and `run_evals.py` now exits non-zero when the bar isn't met. It skips with a warning until `ANTHROPIC_API_KEY` is set on the repository, so until that secret exists it reports rather than blocks.
+2. **Only one of the two bars is pre-registered.** The pass^5 bar now lives in the workflow (`--min-pass-k 1.0`) and is declared before a run. The τ²-bench comparison had no threshold written down beforehand, so 52% → 81% was interpreted after the fact.
 3. **The supervisor verdict is discarded in the eval.** `run_evals.py` binds it to `_verdict`, so a case that passed cleanly and a case that passed only after a REVISE are the same number. Cost per resolved case can't be split by path either.
 4. **Latency never instrumented.** The supervisor's extra round-trip per text turn is unquantified.
 5. **pass^5 = 100% partly reflects a measurement change.** The harness moved from single-turn to multi-turn in the same iteration the bugs were fixed; no control arm separates "agent got better" from "harness could finally reach the end."
@@ -64,7 +64,7 @@ The same agent against Sierra's τ²-bench retail: 114 tasks, an LLM-simulated c
 
 ## Page 2 — Architecture
 
-Left to right: the runtime path for one customer turn. Every model call is its own node; deterministic steps are marked; the refusal path is drawn as a first-class outcome, not an afterthought.
+Top to bottom: the runtime path for one customer turn. Every model call is its own node, deterministic steps are marked, and the refusal path is drawn as a first-class outcome rather than an afterthought.
 
 <p align="center">
   <img src="../architecture.svg" alt="Returns and exchange agent — one customer turn, end to end" width="820">
